@@ -1,0 +1,113 @@
+[
+  {
+    "id": "e01",
+    "dificultad": "fácil",
+    "pregunta": "¿Cuántas tiendas tenemos y cuántas están en provincia?",
+    "sql": "SELECT COUNT(*) AS total_tiendas, COUNT(*) FILTER (WHERE ciudad NOT IN ('Lima', 'Callao')) AS tiendas_provincia FROM tiendas",
+    "plantilla_demo": "Tenemos {f[0][0]} tiendas; {f[0][1]} están en provincia y el resto en Lima Metropolitana (incluido Callao)."
+  },
+  {
+    "id": "e02",
+    "dificultad": "fácil",
+    "pregunta": "¿Cuánto vendimos en total en agosto de 2026?",
+    "sql": "SELECT SUM(d.importe) AS venta_total FROM detalle_venta d JOIN ventas v USING (id_venta) WHERE v.fecha_hora >= DATE '2026-08-01' AND v.fecha_hora < DATE '2026-09-01'",
+    "plantilla_demo": "En agosto 2026 vendimos S/ {f[0][0]:,.2f}."
+  },
+  {
+    "id": "e03",
+    "dificultad": "fácil",
+    "pregunta": "¿Cuál es el ticket promedio de 2026?",
+    "sql": "SELECT SUM(d.importe) / COUNT(DISTINCT v.id_venta) AS ticket_promedio FROM ventas v JOIN detalle_venta d USING (id_venta) WHERE YEAR(v.fecha_hora) = 2026",
+    "plantilla_demo": "El ticket promedio de 2026 es S/ {f[0][0]:,.2f} por boleta."
+  },
+  {
+    "id": "e04",
+    "dificultad": "media",
+    "pregunta": "¿Cuáles son las 5 tiendas que más vendieron en 2026?",
+    "sql": "SELECT t.nombre, SUM(d.importe) AS venta FROM ventas v JOIN detalle_venta d USING (id_venta) JOIN tiendas t USING (id_tienda) WHERE YEAR(v.fecha_hora) = 2026 GROUP BY t.nombre ORDER BY venta DESC LIMIT 5",
+    "plantilla_demo": "Las 5 tiendas con más venta en 2026 son:\n\n{filas}",
+    "fila_demo": "- {0}: S/ {1:,.0f}"
+  },
+  {
+    "id": "e05",
+    "dificultad": "media",
+    "pregunta": "¿Qué porcentaje de las boletas de septiembre 2026 se pagaron con Yape o Plin?",
+    "sql": "SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE medio_pago IN ('Yape', 'Plin')) / COUNT(*), 1) AS pct_billetera_digital FROM ventas WHERE fecha_hora >= DATE '2026-09-01' AND fecha_hora < DATE '2026-10-01'",
+    "plantilla_demo": "En septiembre 2026, el {f[0][0]:.1f}% de las boletas se pagó con billetera digital (Yape o Plin)."
+  },
+  {
+    "id": "e06",
+    "dificultad": "media",
+    "pregunta": "¿Cuál es la categoría con mayor margen bruto en soles este año?",
+    "sql": "SELECT c.nombre AS categoria, SUM(d.importe - d.cantidad * p.costo_unitario) AS margen_bruto FROM detalle_venta d JOIN ventas v USING (id_venta) JOIN productos p USING (id_producto) JOIN categorias c USING (id_categoria) WHERE YEAR(v.fecha_hora) = 2026 GROUP BY c.nombre ORDER BY margen_bruto DESC LIMIT 1",
+    "plantilla_demo": "La categoría con mayor margen bruto en 2026 es {f[0][0]}, con S/ {f[0][1]:,.0f}. Ojo: es margen en soles, no en porcentaje; Abarrotes gana por volumen aunque su margen % sea bajo."
+  },
+  {
+    "id": "e07",
+    "dificultad": "media",
+    "pregunta": "¿A qué hora del día se emiten más boletas?",
+    "sql": "SELECT EXTRACT(hour FROM fecha_hora) AS hora, COUNT(*) AS boletas FROM ventas GROUP BY hora ORDER BY boletas DESC LIMIT 1",
+    "plantilla_demo": "La hora punta es de {f[0][0]}:00 a {f[0][0]}:59, con {f[0][1]:,} boletas en todo el periodo."
+  },
+  {
+    "id": "e08",
+    "dificultad": "media",
+    "pregunta": "¿Cuáles son los 10 productos más vendidos en unidades en la tienda de Magdalena en 2026?",
+    "sql": "SELECT p.nombre, SUM(d.cantidad) AS unidades FROM detalle_venta d JOIN ventas v USING (id_venta) JOIN tiendas t USING (id_tienda) JOIN productos p USING (id_producto) WHERE t.distrito = 'Magdalena del Mar' AND YEAR(v.fecha_hora) = 2026 GROUP BY p.nombre ORDER BY unidades DESC LIMIT 10",
+    "plantilla_demo": "Top 10 en unidades en Magdalena (2026):\n\n{filas}",
+    "fila_demo": "- {0}: {1:,} unidades"
+  },
+  {
+    "id": "e09",
+    "dificultad": "media",
+    "pregunta": "¿Cuánto vendimos en Fiestas Patrias 2026 (27 al 29 de julio) comparado con los mismos días de 2025?",
+    "sql": "SELECT YEAR(v.fecha_hora) AS anio, SUM(d.importe) AS venta FROM ventas v JOIN detalle_venta d USING (id_venta) WHERE MONTH(v.fecha_hora) = 7 AND DAY(v.fecha_hora) BETWEEN 27 AND 29 GROUP BY anio ORDER BY anio",
+    "plantilla_demo": "Fiestas Patrias (27 al 29 de julio):\n\n{filas}\n\nLa diferencia es chica; ojo que en 2026 esos días cayeron lunes a miércoles y en 2025 de domingo a martes.",
+    "fila_demo": "- {0}: S/ {1:,.2f}"
+  },
+  {
+    "id": "e10",
+    "dificultad": "difícil",
+    "pregunta": "¿Cómo evolucionó mes a mes la participación del efectivo en las boletas durante 2026?",
+    "sql": "SELECT DATE_TRUNC('month', fecha_hora)::DATE AS mes, ROUND(100.0 * COUNT(*) FILTER (WHERE medio_pago = 'Efectivo') / COUNT(*), 1) AS pct_efectivo FROM ventas WHERE YEAR(fecha_hora) = 2026 GROUP BY mes ORDER BY mes",
+    "plantilla_demo": "Participación del efectivo en las boletas de 2026, mes a mes:\n\n{filas}\n\nLa tendencia es a la baja: Yape y Plin siguen ganando terreno.",
+    "fila_demo": "- {0:.7}: {1:.1f}%"
+  },
+  {
+    "id": "e11",
+    "dificultad": "difícil",
+    "pregunta": "¿Qué tiendas crecieron más en ventas de enero a septiembre 2026 contra el mismo periodo de 2025? Solo tiendas comparables, top 5 con el crecimiento porcentual.",
+    "sql": "WITH base AS (SELECT t.nombre, SUM(d.importe) FILTER (WHERE YEAR(v.fecha_hora) = 2025 AND MONTH(v.fecha_hora) <= 9) AS venta_2025, SUM(d.importe) FILTER (WHERE YEAR(v.fecha_hora) = 2026 AND MONTH(v.fecha_hora) <= 9) AS venta_2026 FROM ventas v JOIN detalle_venta d USING (id_venta) JOIN tiendas t USING (id_tienda) WHERE t.fecha_apertura < DATE '2025-01-01' GROUP BY t.nombre) SELECT nombre, venta_2025, venta_2026, ROUND(100.0 * (venta_2026 - venta_2025) / venta_2025, 1) AS crecimiento_pct FROM base WHERE venta_2025 > 0 ORDER BY crecimiento_pct DESC LIMIT 5",
+    "plantilla_demo": "Top 5 en crecimiento (ene–set 2026 vs 2025, solo tiendas abiertas antes de 2025):\n\n{filas}\n\nSe excluyen Piura y Barranco porque abrieron durante 2025 y su crecimiento sale inflado.",
+    "fila_demo": "- {0}: {3:+.1f}% (S/ {1:,.0f} → S/ {2:,.0f})"
+  },
+  {
+    "id": "e12",
+    "dificultad": "difícil",
+    "pregunta": "¿Qué porcentaje de la venta de 2026 viene de clientes identificados con la tarjeta de puntos?",
+    "sql": "SELECT ROUND(100.0 * SUM(d.importe) FILTER (WHERE v.id_cliente IS NOT NULL) / SUM(d.importe), 1) AS pct_venta_identificada FROM ventas v JOIN detalle_venta d USING (id_venta) WHERE YEAR(v.fecha_hora) = 2026",
+    "plantilla_demo": "El {f[0][0]:.1f}% de la venta de 2026 viene de clientes que usaron su tarjeta de puntos."
+  },
+  {
+    "id": "e13",
+    "dificultad": "difícil",
+    "pregunta": "¿Quiénes son los 5 clientes que más gastaron en 2026 y cuántas compras hicieron?",
+    "sql": "SELECT c.nombre_completo, COUNT(DISTINCT v.id_venta) AS compras, SUM(d.importe) AS gasto FROM ventas v JOIN detalle_venta d USING (id_venta) JOIN clientes c USING (id_cliente) WHERE YEAR(v.fecha_hora) = 2026 GROUP BY c.id_cliente, c.nombre_completo ORDER BY gasto DESC LIMIT 5",
+    "plantilla_demo": "Los 5 clientes con mayor gasto en 2026:\n\n{filas}",
+    "fila_demo": "- {0}: S/ {2:,.2f} en {1} compras"
+  },
+  {
+    "id": "e14",
+    "dificultad": "difícil",
+    "pregunta": "Compara el ticket promedio de Lima Metropolitana contra provincia en 2026.",
+    "sql": "SELECT CASE WHEN t.ciudad IN ('Lima', 'Callao') THEN 'Lima Metropolitana' ELSE 'Provincia' END AS zona, SUM(d.importe) / COUNT(DISTINCT v.id_venta) AS ticket_promedio FROM ventas v JOIN detalle_venta d USING (id_venta) JOIN tiendas t USING (id_tienda) WHERE YEAR(v.fecha_hora) = 2026 GROUP BY zona ORDER BY zona",
+    "plantilla_demo": "Ticket promedio 2026: {f[0][0]} S/ {f[0][1]:,.2f} vs {f[1][0]} S/ {f[1][1]:,.2f}. Prácticamente iguales."
+  },
+  {
+    "id": "e15",
+    "dificultad": "difícil",
+    "pregunta": "¿Cuál fue el día de la semana con mayor venta promedio diaria en 2026?",
+    "sql": "WITH diario AS (SELECT v.fecha_hora::DATE AS dia, SUM(d.importe) AS venta FROM ventas v JOIN detalle_venta d USING (id_venta) WHERE YEAR(v.fecha_hora) = 2026 GROUP BY dia) SELECT DAYNAME(dia) AS dia_semana, AVG(venta) AS venta_promedio FROM diario GROUP BY dia_semana ORDER BY venta_promedio DESC LIMIT 1",
+    "plantilla_demo": "El día con mayor venta promedio en 2026 es {f[0][0]}, con S/ {f[0][1]:,.0f} diarios en toda la cadena."
+  }
+]
