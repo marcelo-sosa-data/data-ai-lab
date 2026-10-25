@@ -1,0 +1,8 @@
+datos/raw/
+*.duckdb
+*.duckdb.wal
+dbt_matricula/target/
+dbt_matricula/logs/
+dbt_matricula/dbt_packages/
+logs/
+dbt_matricula/.user.yml
