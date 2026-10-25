@@ -1,0 +1,159 @@
+version: 2
+
+models:
+  - name: dim_alumnos
+    description: Un alumno por fila, con su cohorte y si llegó a matricularse.
+    config:
+      contract: {enforced: true}
+    columns:
+      - name: codigo_alumno
+        data_type: varchar
+        constraints: [{type: not_null}, {type: primary_key}]
+        data_tests: [unique]
+      - name: carrera_cod
+        data_type: varchar
+      - name: carrera
+        data_type: varchar
+        constraints: [{type: not_null}]
+      - name: facultad
+        data_type: varchar
+      - name: sede
+        data_type: varchar
+        constraints: [{type: not_null}]
+      - name: cohorte
+        description: Periodo de ingreso.
+        data_type: varchar
+        constraints: [{type: not_null}]
+      - name: modalidad_ingreso
+        data_type: varchar
+      - name: genero
+        data_type: varchar
+      - name: edad_ingreso
+        data_type: bigint
+      - name: distrito
+        data_type: varchar
+      - name: primer_periodo_matriculado
+        data_type: varchar
+      - name: periodos_matriculados
+        data_type: bigint
+      - name: se_matriculo
+        description: Falso para los admitidos que nunca llegaron a matricularse.
+        data_type: boolean
+
+  - name: dim_cursos
+    columns:
+      - name: curso_cod
+        data_tests: [unique, not_null]
+
+  - name: dim_secciones
+    columns:
+      - name: seccion_id
+        data_tests: [unique, not_null]
+      - name: curso_cod
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_cursos')
+                field: curso_cod
+
+  - name: fct_inscripciones
+    description: Una fila por alumno y sección.
+    config:
+      contract: {enforced: true}
+    columns:
+      - name: id_inscripcion
+        data_type: bigint
+        constraints: [{type: not_null}, {type: primary_key}]
+        data_tests: [unique]
+      - name: codigo_alumno
+        data_type: varchar
+        constraints: [{type: not_null}]
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_alumnos')
+                field: codigo_alumno
+      - name: seccion_id
+        data_type: varchar
+        constraints: [{type: not_null}]
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_secciones')
+                field: seccion_id
+      - name: periodo
+        data_type: varchar
+      - name: curso_cod
+        data_type: varchar
+      - name: fecha_inscripcion
+        data_type: timestamp
+        constraints: [{type: not_null}]
+      - name: fecha_retiro
+        data_type: timestamp
+      - name: estado
+        data_type: varchar
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["Vigente", "Retirado", "Cambio de sección"]
+      - name: tipo_matricula
+        data_type: varchar
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["Regular", "Extemporánea"]
+      - name: canal
+        data_type: varchar
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["Web", "App", "Presencial"]
+      - name: nota_final
+        data_type: integer
+      - name: es_nsp
+        data_type: boolean
+      - name: aprobado
+        data_type: boolean
+
+  - name: fct_matricula_alumno
+    description: >
+      Una fila por alumno y periodo matriculado. Base para retención y para
+      el modelo de alerta temprana de deserción.
+    data_tests:
+      - combinacion_unica:
+          arguments:
+            columnas: [codigo_alumno, periodo]
+    columns:
+      - name: codigo_alumno
+        data_tests: [not_null]
+      - name: cuotas_impagas
+        description: Pensiones vencidas y no pagadas al cierre del ciclo (o al corte si sigue abierto).
+      - name: se_matricula_siguiente
+        description: Nulo en el último periodo con datos.
+
+  - name: mart_avance_matricula
+    description: Matriculados acumulados por día desde la apertura de la matrícula.
+
+  - name: mart_ocupacion_secciones
+    description: Ocupación de cada sección al cierre de la extemporánea.
+    columns:
+      - name: categoria
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["Llena", "Normal", "Baja demanda"]
+
+  - name: mart_retencion_cohortes
+    description: Tasa de retención por cohorte y periodos desde el ingreso.
+    columns:
+      - name: tasa_retencion
+        data_tests: [not_null]
+
+  - name: mart_cursos_filtro
+    description: Tasa de retiro y desaprobación por curso en periodos cerrados.
+
+  - name: mart_calidad_datos
+    description: Registros corregidos, descartados o en cuarentena por regla.
+    columns:
+      - name: regla_id
+        data_tests: [unique]

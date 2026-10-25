@@ -1,0 +1,86 @@
+version: 2
+
+models:
+  - name: int_eventos_limpios
+    description: >
+      Eventos sin secciones de prueba ni dobles clics. Incremental: reprocesa
+      los últimos días (var dias_reproceso) en cada corrida.
+    columns:
+      - name: id_evento
+        data_tests: [unique, not_null]
+
+  - name: int_retiros_sin_inscripcion
+    description: Cuarentena de retiros sin inscripción previa. Se revisan, no se borran.
+
+  - name: int_inscripciones
+    description: Una fila por alumno y sección, con su estado final.
+    data_tests:
+      - combinacion_unica:
+          arguments:
+            columnas: [codigo_alumno, seccion_id]
+    columns:
+      - name: id_inscripcion
+        data_tests: [unique, not_null]
+      - name: estado
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["Vigente", "Retirado", "Cambio de sección"]
+
+  - name: int_alumno_periodo
+    description: Una fila por alumno y periodo matriculado.
+    data_tests:
+      - combinacion_unica:
+          arguments:
+            columnas: [codigo_alumno, periodo]
+
+unit_tests:
+  - name: doble_clic_se_descarta
+    description: >
+      Dos inscripciones iguales a 3 segundos son un doble clic. A 10 minutos
+      son eventos distintos (el alumno pudo retirarse y volver a inscribirse).
+      Las secciones PRB- son pruebas de sistemas.
+    model: int_eventos_limpios
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('stg_eventos_matricula')
+        rows:
+          - {id_evento: 1, codigo_alumno: "U1", seccion_id: "S1", tipo_evento: "INSCRIPCION", fecha_hora: "2025-03-01 10:00:00", es_prueba: false}
+          - {id_evento: 2, codigo_alumno: "U1", seccion_id: "S1", tipo_evento: "INSCRIPCION", fecha_hora: "2025-03-01 10:00:03", es_prueba: false}
+          - {id_evento: 3, codigo_alumno: "U1", seccion_id: "S1", tipo_evento: "INSCRIPCION", fecha_hora: "2025-03-01 10:10:00", es_prueba: false}
+          - {id_evento: 4, codigo_alumno: "U2", seccion_id: "S1", tipo_evento: "INSCRIPCION", fecha_hora: "2025-03-01 10:00:01", es_prueba: false}
+          - {id_evento: 5, codigo_alumno: "U0", seccion_id: "PRB-1", tipo_evento: "INSCRIPCION", fecha_hora: "2025-03-01 09:00:00", es_prueba: true}
+    expect:
+      rows:
+        - {id_evento: 1}
+        - {id_evento: 3}
+        - {id_evento: 4}
+
+  - name: retiro_y_reinscripcion_es_cambio_de_seccion
+    description: >
+      Retiro de S1 y alta en S2 del mismo curso durante la matrícula = cambio
+      de sección. Un retiro en plenas clases es un retiro de verdad.
+    model: int_inscripciones
+    given:
+      - input: ref('int_eventos_limpios')
+        rows:
+          - {id_evento: 1, codigo_alumno: "U1", seccion_id: "S1", tipo_evento: "INSCRIPCION", fecha_hora: "2025-03-01 10:00:00", canal: "Web"}
+          - {id_evento: 2, codigo_alumno: "U1", seccion_id: "S1", tipo_evento: "RETIRO", fecha_hora: "2025-03-03 18:00:00", canal: "Web"}
+          - {id_evento: 3, codigo_alumno: "U1", seccion_id: "S2", tipo_evento: "INSCRIPCION", fecha_hora: "2025-03-03 18:00:25", canal: "Web"}
+          - {id_evento: 4, codigo_alumno: "U1", seccion_id: "S3", tipo_evento: "INSCRIPCION", fecha_hora: "2025-03-01 10:00:20", canal: "Web"}
+          - {id_evento: 5, codigo_alumno: "U1", seccion_id: "S3", tipo_evento: "RETIRO", fecha_hora: "2025-04-20 11:00:00", canal: "App"}
+      - input: ref('stg_secciones')
+        rows:
+          - {seccion_id: "S1", periodo: "2025-1", curso_cod: "ING101"}
+          - {seccion_id: "S2", periodo: "2025-1", curso_cod: "ING101"}
+          - {seccion_id: "S3", periodo: "2025-1", curso_cod: "ING103"}
+      - input: ref('calendario_academico')
+        rows:
+          - {periodo: "2025-1", inicio_matricula: "2025-02-24", inicio_clases: "2025-03-17", fin_extemporanea: "2025-03-23", fin_clases: "2025-07-12"}
+    expect:
+      rows:
+        - {seccion_id: "S1", estado: "Cambio de sección", tipo_matricula: "Regular"}
+        - {seccion_id: "S2", estado: "Vigente", tipo_matricula: "Regular"}
+        - {seccion_id: "S3", estado: "Retirado", tipo_matricula: "Regular"}
