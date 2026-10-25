@@ -1,0 +1,7 @@
+matricula:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('MATRICULA_DB', '../datos/universidad.duckdb') }}"
+      threads: 4

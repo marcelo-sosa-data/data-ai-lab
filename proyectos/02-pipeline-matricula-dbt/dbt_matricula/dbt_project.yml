@@ -1,0 +1,47 @@
+name: matricula
+version: "1.0.0"
+config-version: 2
+profile: matricula
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+clean-targets: ["target", "logs"]
+
+vars:
+  # fecha del export: define qué periodos están cerrados y qué cuotas están vencidas
+  fecha_corte: "2026-10-24"
+  max_creditos: 26
+  # dos eventos iguales (alumno, sección, tipo) a menos de N segundos son un doble clic
+  ventana_doble_clic_seg: 60
+  # días hacia atrás que reprocesa el modelo incremental de eventos
+  dias_reproceso: 3
+  umbral_baja_ocupacion: 0.40
+
+seeds:
+  matricula:
+    +schema: referencia
+    calendario_academico:
+      +column_types:
+        periodo: varchar
+        inicio_matricula: date
+        inicio_clases: date
+        fin_extemporanea: date
+        fin_clases: date
+
+models:
+  matricula:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: table
+      +schema: intermedio
+    marts:
+      +materialized: table
+      +schema: marts
+
+data_tests:
+  matricula:
+    +store_failures: false

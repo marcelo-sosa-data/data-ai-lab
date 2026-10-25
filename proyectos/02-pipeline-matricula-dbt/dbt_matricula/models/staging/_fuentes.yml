@@ -1,0 +1,25 @@
+version: 2
+
+sources:
+  - name: sistema_academico
+    description: >
+      Exports en CSV del sistema académico. Llegan todos como texto
+      (all_varchar) para que el tipado y la limpieza pasen por staging y no
+      dependan de lo que DuckDB adivine.
+    config:
+      meta:
+        external_location: "read_csv('{{ env_var('MATRICULA_RAW', '../datos/raw') }}/{name}.csv', header = true, all_varchar = true)"
+    tables:
+      - name: alumnos
+        description: Maestro de alumnos. Trae una fila por cada actualización del registro.
+      - name: carreras
+      - name: cursos
+      - name: plan_estudios
+      - name: secciones
+        description: Secciones abiertas por periodo. Sede y turno vienen como código del sistema.
+      - name: eventos_matricula
+        description: Log de inscripciones (INS) y retiros (RET), una fila por curso.
+      - name: pagos
+        description: Matrícula (cuota 0) y pensiones (cuotas 1 a 5). fecha_pago vacía = no pagada al corte.
+      - name: notas
+        description: Nota final por alumno y sección, solo periodos cerrados.

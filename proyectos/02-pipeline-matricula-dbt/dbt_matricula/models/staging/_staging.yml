@@ -1,0 +1,103 @@
+version: 2
+
+models:
+  - name: stg_alumnos
+    description: Última versión de cada alumno, con la sede normalizada.
+    columns:
+      - name: codigo_alumno
+        data_tests: [unique, not_null]
+      - name: sede
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["Lima Norte", "Lima Centro", "Arequipa"]
+      - name: carrera_cod
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_carreras')
+                field: carrera_cod
+
+  - name: stg_secciones
+    columns:
+      - name: seccion_id
+        data_tests: [unique, not_null]
+      - name: turno
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["Mañana", "Tarde", "Noche"]
+      - name: sede
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["Lima Norte", "Lima Centro", "Arequipa", "Virtual"]
+      - name: vacantes
+        data_tests: [not_null]
+
+  - name: stg_eventos_matricula
+    description: Log de matrícula tipado, sin descartar nada.
+    columns:
+      - name: id_evento
+        data_tests: [unique, not_null]
+      - name: fecha_hora
+        description: Si sale nula, apareció un formato de fecha nuevo en el export.
+        data_tests: [not_null]
+      - name: tipo_evento
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["INSCRIPCION", "RETIRO"]
+
+  - name: stg_pagos
+    columns:
+      - name: monto
+        description: Nulo si el texto no se pudo convertir a número.
+        data_tests: [not_null]
+      - name: cuota
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1, 2, 3, 4, 5]
+                quote: false
+
+  - name: stg_notas
+    columns:
+      - name: nota_final
+        data_tests: [not_null]
+
+unit_tests:
+  - name: monto_con_formato_de_texto
+    description: El export de pagos a veces trae el monto como "S/ 1,250.00".
+    model: stg_pagos
+    given:
+      # las fuentes externas (read_csv) no se pueden inspeccionar: el fixture va en SQL
+      - input: source('sistema_academico', 'pagos')
+        format: sql
+        rows: |
+          select ' u202400001' as codigo_alumno, '2025-1' as periodo, '1' as cuota,
+                 '2025-03-24' as fecha_vencimiento, '' as fecha_pago, 'S/ 1,250.00' as monto
+          union all
+          select 'U202400002', '2025-1', '2', '2025-04-19', '2025-04-18 10:00:00', '980.50'
+    expect:
+      rows:
+        - {codigo_alumno: "U202400001", monto: 1250.00, monto_con_formato: true, fecha_pago: null}
+        - {codigo_alumno: "U202400002", monto: 980.50, monto_con_formato: false, fecha_pago: "2025-04-18 10:00:00"}
+
+  - name: fecha_de_ventanilla_en_dd_mm
+    model: stg_eventos_matricula
+    given:
+      - input: source('sistema_academico', 'eventos_matricula')
+        format: sql
+        rows: |
+          select '1' as id_evento, 'U202400001' as codigo_alumno, 'S1' as seccion_id, 'INS' as tipo,
+                 '2025-03-02 21:15:09' as fecha_hora, 'Web' as canal
+          union all
+          select '2', 'u202400001 ', 'S1', 'RET', '14/04/2025 10:30', 'Presencial'
+    expect:
+      rows:
+        - {id_evento: 1, fecha_hora: "2025-03-02 21:15:09", fecha_formato_ddmm: false, tipo_evento: "INSCRIPCION",
+           codigo_alumno: "U202400001", codigo_corregido: false}
+        - {id_evento: 2, fecha_hora: "2025-04-14 10:30:00", fecha_formato_ddmm: true, tipo_evento: "RETIRO",
+           codigo_alumno: "U202400001", codigo_corregido: true}
