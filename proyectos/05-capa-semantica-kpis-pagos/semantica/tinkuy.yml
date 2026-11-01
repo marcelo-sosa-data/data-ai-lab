@@ -1,0 +1,132 @@
+# Capa semántica de Tinkuy Pay.
+# Cada métrica se define una sola vez; el tablero, la CLI, el monitor y la explicación
+# de anomalías la compilan desde aquí. Cambiar una definición es un PR a este archivo.
+#
+# En dimensiones:
+#   explicable: false  -> es un resultado, no una causa (estado, motivo de rechazo); no entra
+#                         a la explicación automática de anomalías
+#   deriva: true       -> su mezcla cambia sola con el tiempo (versiones, cohortes); no entra a
+#                         explicar métricas aditivas, donde todo cambio de peso parece "causa"
+
+modelos:
+  transacciones:
+    tabla: transacciones
+    descripcion: Un intento de cobro por fila, aprobado o rechazado
+    tiempo: fecha
+    entidades:
+      comercio: {columna: id_comercio, tipo: foranea}
+    dimensiones:
+      metodo: {expr: metodo, descripcion: "qr, debito, credito o link"}
+      emisor: {expr: emisor, descripcion: Banco o billetera que autoriza el cobro}
+      plataforma: {expr: plataforma, descripcion: "Desde dónde cobra el comercio: android, ios o pos"}
+      version_app: {expr: version_app, descripcion: Versión de la app del comercio (pos-3 en POS), deriva: true}
+      estado: {expr: estado, explicable: false}
+      motivo_rechazo: {expr: motivo_rechazo, explicable: false}
+      hora: {expr: "extract(hour from fecha_hora)", descripcion: Hora del cobro (0-23)}
+
+  comercios:
+    tabla: comercios
+    descripcion: Maestro de comercios afiliados
+    entidades:
+      comercio: {columna: id_comercio, tipo: primaria}
+    dimensiones:
+      rubro: {expr: rubro}
+      region: {expr: region}
+      segmento: {expr: segmento, descripcion: micro o pyme}
+      canal_alta: {expr: canal_alta, descripcion: Cómo llegó el comercio (comercial o bodega_digital)}
+      cohorte: {expr: "strftime(fecha_alta, '%Y-%m')", descripcion: Mes de afiliación, deriva: true}
+
+medidas:
+  intentos:
+    modelo: transacciones
+    agregacion: count
+    descripcion: Cobros intentados, aprobados o no
+  aprobadas:
+    modelo: transacciones
+    agregacion: count
+    filtro: "estado = 'aprobada'"
+  tpv:
+    modelo: transacciones
+    agregacion: sum
+    expr: monto
+    filtro: "estado = 'aprobada'"
+  ingresos:
+    modelo: transacciones
+    agregacion: sum
+    expr: comision
+    filtro: "estado = 'aprobada'"
+  comercios_activos:
+    modelo: transacciones
+    agregacion: count_distinct
+    expr: id_comercio
+    filtro: "estado = 'aprobada'"
+    descripcion: Comercios con al menos un cobro aprobado en el periodo
+
+metricas:
+  tpv:
+    tipo: simple
+    medida: tpv
+    etiqueta: TPV
+    descripcion: Volumen total procesado (monto de cobros aprobados)
+    formato: soles
+    responsable: Finanzas
+    monitor: {modelo: multiplicativo, umbral_minimo: 0.08}
+
+  transacciones:
+    tipo: simple
+    medida: intentos
+    etiqueta: Transacciones
+    descripcion: Cobros intentados, aprobados o rechazados
+    formato: entero
+    responsable: Producto
+    monitor: {modelo: multiplicativo, umbral_minimo: 0.08}
+
+  tasa_aprobacion:
+    tipo: ratio
+    numerador: aprobadas
+    denominador: intentos
+    etiqueta: Tasa de aprobación
+    descripcion: Cobros aprobados sobre cobros intentados
+    formato: porcentaje
+    responsable: Operaciones
+    monitor: {modelo: aditivo, umbral_minimo: 0.006}
+
+  ticket_promedio:
+    tipo: ratio
+    numerador: tpv
+    denominador: aprobadas
+    etiqueta: Ticket promedio
+    descripcion: Monto promedio de un cobro aprobado
+    formato: soles_decimal
+    responsable: Comercial
+
+  take_rate:
+    tipo: ratio
+    numerador: ingresos
+    denominador: tpv
+    etiqueta: Take rate
+    descripcion: Comisión cobrada sobre el TPV
+    formato: porcentaje_fino
+    responsable: Finanzas
+
+  ingresos:
+    tipo: simple
+    medida: ingresos
+    etiqueta: Ingresos por comisión
+    formato: soles
+    responsable: Finanzas
+
+  comercios_activos:
+    tipo: simple
+    medida: comercios_activos
+    etiqueta: Comercios activos
+    descripcion: Comercios con al menos un cobro aprobado en el periodo (no se suma entre periodos)
+    formato: entero
+    responsable: Comercial
+
+  tpv_por_comercio:
+    tipo: derivada
+    expr: "tpv / comercios_activos"
+    etiqueta: TPV por comercio activo
+    formato: soles_decimal
+    responsable: Comercial
