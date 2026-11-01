@@ -1,0 +1,33 @@
+[project]
+name = "kpis"
+version = "0.1.0"
+description = "Capa semántica de métricas en YAML compilada a SQL, monitor diario de KPIs y explicación de anomalías"
+requires-python = ">=3.10"
+dependencies = [
+    "duckdb>=1.1",
+    "sqlglot>=25",
+    "pydantic>=2.6",
+    "pyyaml>=6",
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "pyarrow>=15",
+    "rich>=13",
+]
+
+[project.optional-dependencies]
+app = ["streamlit>=1.40", "altair>=5"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+kpis = "kpis.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
