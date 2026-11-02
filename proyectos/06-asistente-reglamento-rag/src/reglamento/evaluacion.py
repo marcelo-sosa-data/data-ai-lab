@@ -13,6 +13,7 @@ Evaluación de la búsqueda, del umbral de abstención y de las respuestas.
 from __future__ import annotations
 
 import json
+import unicodedata
 from datetime import date
 from pathlib import Path
 
@@ -21,7 +22,6 @@ import pandas as pd
 
 from .asistente import Asistente
 from .recuperador import Configuracion, Recuperador
-from .texto import normalizar
 
 FECHA_EVALUACION = date(2026, 9, 1)     # semestre 2026-2, con la resolución ya vigente
 COBERTURA = 0.95
@@ -93,6 +93,14 @@ def separacion(df: pd.DataFrame) -> float:
     return float(((pos[:, None] > neg[None, :]) + 0.5 * (pos[:, None] == neg[None, :])).mean())
 
 
+def contiene_dato(texto: str, dato: str) -> bool:
+    """Sin tildes ni mayúsculas, pero con signos: '30%' no debe coincidir con 'S/ 30'."""
+    def plano(t: str) -> str:
+        t = unicodedata.normalize("NFKD", t.lower())
+        return " ".join("".join(c for c in t if not unicodedata.combining(c)).split())
+    return bool(dato) and plano(dato) in plano(texto)
+
+
 def evaluar_respuestas(asistente: Asistente, preguntas: list[dict],
                        fecha: date = FECHA_EVALUACION) -> pd.DataFrame:
     filas = []
@@ -103,7 +111,7 @@ def evaluar_respuestas(asistente: Asistente, preguntas: list[dict],
             "id": q["id"], "pregunta": q["pregunta"], "tipo": q["tipo"], "registro": q["registro"],
             "respondio": r.respondio, "abstencion": r.abstencion,
             "cita_correcta": any(c in q["gold"] for c in citas),
-            "dato_en_texto": bool(q["dato"]) and normalizar(q["dato"]) in normalizar(r.texto),
+            "dato_en_texto": contiene_dato(r.texto, q["dato"]),
             "citas_descartadas": len(r.citas_descartadas),
             "tokens": r.tokens_entrada + r.tokens_salida, "segundos": r.segundos,
         })

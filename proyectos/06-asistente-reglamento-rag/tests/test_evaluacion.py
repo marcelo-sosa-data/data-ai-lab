@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from reglamento.asistente import Asistente
-from reglamento.evaluacion import (calibrar_umbral, evaluar_abstencion, evaluar_busqueda,
+from reglamento.evaluacion import (calibrar_umbral, contiene_dato, evaluar_abstencion, evaluar_busqueda,
                                    evaluar_respuestas, resumen_busqueda, resumen_respuestas, separacion)
 from reglamento.llm import ModeloExtractivo
 from reglamento.recuperador import CONFIGURACIONES
@@ -68,3 +68,10 @@ def test_evaluar_respuestas_extractivas(recuperador, preguntas):
     r = resumen_respuestas(df)
     assert r["validas"] + r["sin_respuesta"] == len(muestra)
     assert df.loc[df["cita_correcta"], "respondio"].all()
+
+
+def test_contiene_dato_respeta_signos():
+    assert contiene_dato("El parcial no puede pesar más de 30% ...", "30%")
+    assert not contiene_dato("la constancia cuesta S/ 30", "30%")
+    assert contiene_dato("La nota mínima aprobatoria es ONCE (11).", "once (11)")
+    assert not contiene_dato("cualquier texto", "")
