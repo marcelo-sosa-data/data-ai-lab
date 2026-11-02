@@ -120,7 +120,7 @@ def mostrar(r: Respuesta, detalle: bool) -> None:
     titulo = "Respuesta" if r.respondio else f"Sin respuesta ({r.abstencion})"
     consola.print(Panel(r.texto, title=titulo, title_align="left", border_style=color))
     if r.citas:
-        consola.print("[dim]Fuentes:[/] " + " · ".join(f"[{CIAN}]{f.cita}[/]" for f in r.citas))
+        consola.print("[dim]Fuentes:[/] " + " · ".join(f"[{CIAN}]{f.cita}[/]" for f in r.citas), highlight=False)
     consola.print(f"[dim]{r.segundos:.2f} s · {r.tokens_entrada + r.tokens_salida:,} tokens[/]")
 
 
@@ -194,9 +194,15 @@ def cmd_evaluar(args) -> None:
     # 4. opcional: comparar modelos de vectores (solo búsqueda vectorial)
     if args.modelos:
         filas = []
+        # un modelo a la vez: e5-large ocupa ~2 GB en memoria
+        del asistente
+        principal, recuperador = recuperador, None
         for m in MODELOS_COMPARADOS:
-            cod = CodificadorLocal(m)
-            rec = Recuperador(fragmentos, cod, ruta_vectores(m))
+            if principal and principal.codificador and principal.codificador.nombre == m:
+                rec = principal
+            else:
+                rec = Recuperador(fragmentos, CodificadorLocal(m), ruta_vectores(m))
+            rec._consultas.clear()     # que el tiempo incluya codificar cada pregunta
             t0 = time.perf_counter()
             d = evaluar_busqueda(rec, preguntas, CONFIGURACIONES["vectorial"])
             seg = time.perf_counter() - t0
@@ -207,6 +213,7 @@ def cmd_evaluar(args) -> None:
                 fila[f"acierto@1 {x['registro']}"] = round(x["acierto@1"], 4)
                 fila[f"acierto@5 {x['registro']}"] = round(x["acierto@5"], 4)
             filas.append(fila)
+            del rec
         resumen["modelos"] = filas
 
     (salida / "resumen.json").write_text(json.dumps(resumen, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -229,9 +236,11 @@ def _imprimir_resumen(r: dict) -> None:
                   f"{tot.loc[cfg, 'mrr']:.3f}")
     consola.print(t)
 
-    for e in r["errores_version"]:
-        color = ROJO if e["errores"] else VERDE
-        consola.print(f"  versión derogada antes que la vigente · {e['config']}: [{color}]{e['errores']}/{e['n']}[/]")
+    con_error = [e for e in r["errores_version"] if e["errores"]]
+    sin_error = [e["config"] for e in r["errores_version"] if not e["errores"]]
+    consola.print(f"  versión derogada antes que la vigente: [{VERDE}]0/{r['errores_version'][0]['n']}[/] en {len(sin_error)} configuraciones"
+                  + "".join(f" · [{ROJO}]{e['errores']}/{e['n']}[/] {e['config']}" for e in con_error),
+                  highlight=False)
 
     clave = r["respuestas_extractivo"]["config"]
     u = r["umbrales"][clave]
