@@ -1,0 +1,32 @@
+[project]
+name = "reglamento"
+version = "0.1.0"
+description = "Asistente del reglamento académico: búsqueda con vigencia por fecha, abstención calibrada y citas verificadas"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "snowballstemmer>=2.2",
+    "fastembed>=0.5",
+    "openai>=1.50",
+    "rich>=13",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+app = ["streamlit>=1.40", "altair>=5"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+reglamento = "reglamento.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

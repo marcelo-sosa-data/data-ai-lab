@@ -1,0 +1,10 @@
+numpy>=1.26
+pandas>=2.1
+snowballstemmer>=2.2
+fastembed>=0.5
+openai>=1.50
+rich>=13
+python-dotenv>=1.0
+streamlit>=1.40
+altair>=5
+pytest>=8
