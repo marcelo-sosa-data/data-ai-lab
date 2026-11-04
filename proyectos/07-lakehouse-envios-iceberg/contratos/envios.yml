@@ -1,0 +1,52 @@
+# Contrato de datos de la tabla `envios` entre el equipo de Plataforma (dueño del origen)
+# y Datos (consumidor). Lo lee el pipeline: arma el esquema de plata, valida cada evento
+# del CDC y decide qué va a cuarentena. Cambiarlo es un PR que revisan los dos equipos.
+
+contrato: envios
+version: 1.1.0
+# desde qué fecha rige cada versión; el pipeline valida cada lote con la vigente a su corte
+versiones:
+  1.0.0: 2026-06-01
+  1.1.0: 2026-09-17   # franja_horaria. Plataforma la agregó en origen el 15; el PR se aprobó el 17
+dueno: Plataforma de Envíos
+consumidor: Datos y Analítica
+fuente: kallpa_oltp.public.envios (CDC, Debezium)
+clave: id_envio
+particion: registrado_en          # day(registrado_en): la fecha de registro no cambia
+
+columnas:
+  id_envio:           {tipo: long, requerido: true}
+  codigo_seguimiento: {tipo: string, requerido: true, patron: '^KL[0-9]{10}$'}
+  id_cliente:         {tipo: int, requerido: true}
+  canal:              {tipo: string, requerido: true, valores: [api, panel_web, agencia]}
+  servicio:           {tipo: string, requerido: true, valores: [mismo_dia, express, estandar]}
+  distrito:           {tipo: string, requerido: true, valores_de: referencia/distritos.csv}
+  peso_kg:            {tipo: double, requerido: true, minimo: 0.01, maximo: 70}
+  monto_cod:          {tipo: double, requerido: true, minimo: 0, maximo: 5000}
+  estado:
+    tipo: string
+    requerido: true
+    valores: [registrado, recogido, en_almacen, en_ruta, entregado, intento_fallido, devuelto, cancelado]
+  intentos:           {tipo: int, requerido: true, minimo: 0, maximo: 3}
+  id_courier:         {tipo: int}
+  registrado_en:      {tipo: timestamp, requerido: true}
+  fecha_promesa:      {tipo: date, requerido: true}
+  entregado_en:       {tipo: timestamp}
+  actualizado_en:     {tipo: timestamp, requerido: true}
+  franja_horaria:     {tipo: string, valores: [manana, tarde, noche], desde: 1.1.0}
+
+reglas:
+  - nombre: entregado_con_hora
+    descripcion: un envío entregado tiene hora de entrega
+    sql: "estado <> 'entregado' OR entregado_en IS NOT NULL"
+    columnas: [estado, entregado_en]
+  - nombre: promesa_no_antes_del_registro
+    sql: "fecha_promesa >= CAST(registrado_en AS DATE)"
+    columnas: [fecha_promesa, registrado_en]
+
+# historial de estados: solo necesita estas columnas sanas; un peso malo no invalida
+# que el envío pasó a en_ruta
+columnas_historial: [id_envio, estado, actualizado_en, entregado_en]
+
+# si más de este porcentaje de un lote cae en cuarentena, el chequeo del lote falla
+umbral_cuarentena: 0.02

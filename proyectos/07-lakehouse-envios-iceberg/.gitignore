@@ -1,0 +1,6 @@
+datos/cdc/
+datos/origen/
+datos/lakehouse/
+datos/*.duckdb
+datos/*.duckdb.wal
+.dagster/

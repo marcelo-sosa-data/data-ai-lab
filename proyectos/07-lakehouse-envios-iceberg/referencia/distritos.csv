@@ -1,0 +1,43 @@
+distrito,provincia,zona
+Miraflores,Lima,lima_centro
+San Isidro,Lima,lima_centro
+Santiago de Surco,Lima,lima_centro
+San Borja,Lima,lima_centro
+Barranco,Lima,lima_centro
+Lince,Lima,lima_centro
+Jesús María,Lima,lima_centro
+Pueblo Libre,Lima,lima_centro
+Magdalena del Mar,Lima,lima_centro
+San Miguel,Lima,lima_centro
+Surquillo,Lima,lima_centro
+La Molina,Lima,lima_centro
+Cercado de Lima,Lima,lima_centro
+Breña,Lima,lima_centro
+La Victoria,Lima,lima_centro
+Chorrillos,Lima,lima_centro
+San Juan de Lurigancho,Lima,lima_periferia
+San Martín de Porres,Lima,lima_periferia
+Los Olivos,Lima,lima_periferia
+Comas,Lima,lima_periferia
+Independencia,Lima,lima_periferia
+Puente Piedra,Lima,lima_periferia
+Carabayllo,Lima,lima_periferia
+Ate,Lima,lima_periferia
+Santa Anita,Lima,lima_periferia
+El Agustino,Lima,lima_periferia
+San Juan de Miraflores,Lima,lima_periferia
+Villa El Salvador,Lima,lima_periferia
+Villa María del Triunfo,Lima,lima_periferia
+Lurín,Lima,lima_periferia
+Pachacámac,Lima,lima_periferia
+Callao,Callao,callao
+Bellavista,Callao,callao
+La Perla,Callao,callao
+Ventanilla,Callao,callao
+Arequipa,Arequipa,provincia
+Trujillo,Trujillo,provincia
+Chiclayo,Chiclayo,provincia
+Piura,Piura,provincia
+Cusco,Cusco,provincia
+Huancayo,Huancayo,provincia
+Ica,Ica,provincia

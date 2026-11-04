@@ -1,0 +1,34 @@
+[project]
+name = "lakehouse"
+version = "0.1.0"
+description = "Ingesta incremental del CDC de envíos a tablas Iceberg, con contratos de datos, historial y mantenimiento"
+requires-python = ">=3.10"
+dependencies = [
+    "pyiceberg[sql-sqlite,pyarrow,pyiceberg-core]>=0.10",
+    "duckdb>=1.1",
+    "pyarrow>=17",
+    "pandas>=2.1",
+    "pydantic>=2.6",
+    "pyyaml>=6",
+    "rich>=13",
+]
+
+[project.optional-dependencies]
+orquestacion = ["dagster>=1.10", "dagster-webserver>=1.10"]
+app = ["streamlit>=1.40", "altair>=5"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+lakehouse = "lakehouse.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = ["ignore::DeprecationWarning", "ignore:Delete operation did not match any records"]

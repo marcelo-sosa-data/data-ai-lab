@@ -1,0 +1,12 @@
+pyiceberg[sql-sqlite,pyarrow,pyiceberg-core]>=0.10
+duckdb>=1.1
+pyarrow>=17
+pandas>=2.1
+pydantic>=2.6
+pyyaml>=6
+rich>=13
+dagster>=1.10
+dagster-webserver>=1.10
+streamlit>=1.40
+altair>=5
+pytest>=8
