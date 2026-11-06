@@ -1,0 +1,11 @@
+lightgbm>=4.3
+scikit-learn>=1.4
+shap>=0.45
+lifelines>=0.29
+duckdb>=1.1
+numpy>=1.26
+pandas>=2.1
+rich>=13
+streamlit>=1.40
+altair>=5.4
+pytest>=8

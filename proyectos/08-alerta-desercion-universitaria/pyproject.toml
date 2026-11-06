@@ -1,0 +1,33 @@
+[project]
+name = "desercion"
+version = "0.1.0"
+description = "Alerta temprana de deserción universitaria: riesgo semanal calibrado, explicado y lista de contacto"
+requires-python = ">=3.10"
+dependencies = [
+    "lightgbm>=4.3",
+    "scikit-learn>=1.4",
+    "shap>=0.45",
+    "lifelines>=0.29",
+    "duckdb>=1.1",
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "rich>=13",
+]
+
+[project.optional-dependencies]
+app = ["streamlit>=1.40", "altair>=5.4"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+desercion = "desercion.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
