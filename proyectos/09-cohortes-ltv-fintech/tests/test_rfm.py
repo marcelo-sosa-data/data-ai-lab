@@ -2,7 +2,6 @@ from datetime import date
 
 import numpy as np
 import pandas as pd
-import pytest
 from pymc_marketing.clv import rfm_summary
 
 from cohortes import rfm as R

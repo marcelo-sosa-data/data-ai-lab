@@ -13,8 +13,6 @@ El CAC es el de los últimos seis meses de cohortes, que es el que se está paga
 
 from __future__ import annotations
 
-from datetime import date
-
 import numpy as np
 import pandas as pd
 
