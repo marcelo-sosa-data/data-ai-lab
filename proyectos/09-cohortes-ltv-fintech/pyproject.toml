@@ -1,0 +1,31 @@
+[project]
+name = "cohortes"
+version = "0.1.0"
+description = "Cohortes, valor de vida (MBG/NBD y Gamma-Gamma) y retorno del gasto por canal en una billetera digital"
+requires-python = ">=3.11"
+dependencies = [
+    "pymc-marketing>=0.15",
+    "duckdb>=1.1",
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "rich>=13",
+]
+
+[project.optional-dependencies]
+app = ["streamlit>=1.40", "altair>=5.4"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+cohortes = "cohortes.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning", "ignore::UserWarning"]
