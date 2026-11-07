@@ -1,23 +1,58 @@
 # Lakehouse de envíos con Iceberg y CDC
 
-Los cambios de la tabla de envíos de un courier llegan cada 6 horas como eventos de CDC. Los cargo a tablas Apache Iceberg en tres capas, los valido contra un contrato de datos versionado, mantengo el estado actual y el historial de cada envío, publico el cumplimiento de promesa cada mañana y dejo cada publicación etiquetada para poder volver a ella.
+Los cambios de la tabla de envíos de un courier llegan cada 6 horas como eventos de CDC. Los cargo a Apache Iceberg en tres capas, los valido contra un contrato versionado y cada mañana publico el cumplimiento de promesa con una etiqueta, para poder decir después qué número se vio ese día.
 
-![Resumen del lakehouse](docs/img/app_resumen.png)
+## De dónde sale
 
-## El problema
+Kallpa Envíos (empresa ficticia) hace última milla para unas 320 tiendas online en Lima, Callao y siete ciudades de provincia. Cada cambio de estado de un envío es un `UPDATE` en la base transaccional, y a Datos le llega por CDC en formato Debezium, en archivos que el conector deja cada 6 horas.
 
-Kallpa Envíos (empresa ficticia) hace última milla para unas 320 tiendas online en Lima, Callao y siete ciudades de provincia: registra el envío, lo recoge, lo pasa por almacén y lo reparte. Cada cambio de estado es un `UPDATE` en la base transaccional, y Datos los recibe por CDC (formato Debezium) en archivos que el conector deja cada 6 horas.
+El `MERGE` que había fallaba por varios lados. El conector entrega al menos una vez y los duplicados inflaban el historial. Algunos eventos llegan lotes después, y si gana lo último que llegó, un envío entregado vuelve a figurar `en_ruta`. Origen cambiaba sin avisar y nos enterábamos por el tablero. Y como los motorizados sin señal sincronizan la entrega horas después, nadie podía decir qué OTD se vio el lunes a las 8.
 
-Lo que pasaba con el `MERGE` que había:
+## Cómo queda el proceso
 
-- **El conector entrega al menos una vez.** Cuando se reinicia, reenvía lo último que mandó. Los duplicados inflaban el historial de estados.
-- **No todo llega en orden.** Por reintentos, un evento puede llegar uno o varios lotes después. Si se aplica "lo último que llegó", un envío entregado vuelve a figurar `en_ruta`.
-- **Origen cambia sin avisar.** Un día la app de agencias empezó a mandar el peso en gramos; otro, un deploy mandó los estados en mayúsculas; otro, Plataforma agregó una columna. Nos enterábamos por el tablero.
-- **El OTD de la reunión de la mañana no era el del día siguiente.** Los motorizados sin señal sincronizan la entrega horas después. Nadie podía decir qué número se vio el lunes a las 8.
+Así fluye un lote desde origen hasta la reunión de Operaciones. La cuarentena no frena el lote; si pasa del umbral, Datos revisa y le lleva la evidencia a Plataforma.
 
-Quería un pipeline que se pueda correr de nuevo sin miedo, que no deje pasar datos rotos a las tablas que consume el negocio y que guarde qué se publicó cada día.
+```mermaid
+flowchart LR
+    subgraph PLA[Plataforma]
+        ini((Inicio)) --> upd[Actualizar estado del envío en origen]
+        cor[Corregir el dato en origen]
+    end
+    subgraph CON[Conector CDC]
+        upd --> lote[Escribir lote cada 6 h]
+    end
+    subgraph SIS[Pipeline]
+        lote --> bro[Guardar lote en bronce]
+        bro --> val{¿Cumple el contrato vigente?}
+        val -- no --> cua[Enviar evento a cuarentena]
+        cua --> umb{¿Más de 2% del lote?}
+        val -- sí --> his[Registrar cambio en historial]
+        his --> lsn{¿lsn mayor al de plata?}
+        lsn -- sí --> act[Actualizar estado actual]
+        lsn -- no --> ign[Ignorar para estado actual]
+        act --> cor6{¿Corte de las 06:00?}
+        ign --> cor6
+        umb -- no --> cor6
+        cor6 -- sí --> pub[Publicar OTD y etiquetar corte]
+        cor6 -- no --> esp(((Fin del lote)))
+    end
+    subgraph DAT[Datos]
+        umb -- sí --> rev[Revisar motivos de cuarentena]
+        rev --> avi[Avisar a Plataforma con evidencia de bronce]
+    end
+    subgraph OPE[Operaciones]
+        pub --> reu[Revisar OTD en la reunión de la mañana]
+        reu --> fin(((Fin)))
+    end
+    avi --> cor
+    cor --> lote
+    classDef sobrio fill:#f4f4f2,stroke:#555,color:#222
+    class upd,cor,lote,bro,cua,act,his,ign,pub,rev,avi,reu sobrio
+```
 
-## Qué hace
+La corrección de Plataforma vuelve a entrar como un evento más, con `lsn` mayor, y plata la toma sin reprocesar nada.
+
+## Las tablas
 
 ```mermaid
 flowchart LR
@@ -26,114 +61,83 @@ flowchart LR
     v -- válidos --> p[(plata.envios<br/>estado actual<br/>gana el lsn mayor)]
     v -- válidos para historial --> h[(plata.estados_envio<br/>cada cambio de estado)]
     v -- rompen reglas --> q[(plata.cuarentena<br/>evento + motivo)]
+    b -. relleno de columnas nuevas .-> p
     p --> o[(oro.entregas_diarias<br/>06:00, tag por corte)]
     m[mantenimiento<br/>domingos] -.-> b & p & h & q & o
 ```
 
-- **Bronce** ([`ingesta.py`](src/lakehouse/ingesta.py)): agrega cada lote tal como llegó, con archivo y línea. Nada se corrige aquí; es la evidencia.
-- **Contrato** ([`contratos/envios.yml`](contratos/envios.yml), [`contrato.py`](src/lakehouse/contrato.py)): tipos, obligatorios, dominios, rangos, patrón del código de seguimiento y reglas entre columnas. De ahí sale el esquema de plata y el SQL que valida cada evento. Tiene versiones con fecha de vigencia y cada lote se valida con la que regía en su corte.
-- **Plata, estado actual**: deduplica por `lsn`, se queda con el último evento de cada envío y lo aplica solo si su `lsn` es mayor al que ya está en la tabla. Es copy-on-write por día de registro: solo se reescriben los días que el lote toca.
-- **Plata, historial**: cada cambio de estado con su hora real (la de entrega, no la de sincronización). Un evento tardío sí entra aquí: el cambio de estado ocurrió, solo llegó tarde.
-- **Cuarentena**: los eventos que rompen el contrato, con la lista de reglas que rompen. No se pierden ni bloquean el lote.
-- **Oro** ([`oro.py`](src/lakehouse/oro.py)): en el corte de las 06:00 recalcula el cumplimiento de promesa de los últimos 35 días por zona y servicio, y etiqueta el snapshot como `corte-AAAA-MM-DD`.
-- **Mantenimiento** ([`mantenimiento.py`](src/lakehouse/mantenimiento.py)): cada domingo compacta particiones con muchos archivos chicos, expira snapshots (menos los etiquetados) y borra los archivos que ya nadie referencia.
-- **Orquestación** ([`definiciones.py`](src/lakehouse/definiciones.py)): assets de Dagster con chequeos (clave única, cuarentena bajo el umbral), un sensor que lanza una corrida por cada carpeta de lote nueva y el mantenimiento semanal. La CLI usa las mismas funciones sin Dagster.
+Bronce ([`ingesta.py`](src/lakehouse/ingesta.py)) agrega cada lote tal como llegó, con archivo y línea, y no corrige nada. El contrato ([`contratos/envios.yml`](contratos/envios.yml), leído por [`contrato.py`](src/lakehouse/contrato.py)) define tipos, dominios, rangos y reglas entre columnas, y de ahí salen el esquema de plata y el SQL que valida cada evento. Cada lote se valida con la versión que regía en su corte.
 
-## Datos
+En plata, el estado actual deduplica por `lsn` y aplica el último evento de cada envío solo si su `lsn` es mayor al que ya está. Es copy-on-write por día de registro, así que solo se reescriben los días que el lote toca. El historial guarda cada cambio de estado con su hora real, y ahí un evento tardío sí entra, porque el cambio ocurrió aunque haya llegado tarde. Lo que rompe el contrato va a cuarentena con la lista de reglas que rompe.
 
-[`generar_datos.py`](datos/generar_datos.py) simula primero la base transaccional (la vida completa de cada envío) y después el conector que la convierte en archivos. Semilla fija, unos 45 segundos.
+Oro ([`oro.py`](src/lakehouse/oro.py)) recalcula en el corte de las 06:00 el cumplimiento de promesa de los últimos 35 días por zona y servicio y etiqueta el snapshot como `corte-AAAA-MM-DD`. Los domingos, [`mantenimiento.py`](src/lakehouse/mantenimiento.py) compacta, expira snapshots que no tengan tag y borra archivos huérfanos. Todo corre como assets de Dagster en [`definiciones.py`](src/lakehouse/definiciones.py), con chequeos y un sensor por lote nuevo; la CLI usa las mismas funciones sin Dagster.
 
-Del 1 de julio al 31 de octubre de 2026: **124,468 envíos**, **637,279 eventos** de cambio en **492 lotes** de 6 horas. Los archivos ocupan 40 MB.
+## Datos simulados
 
-| Patrón | En los datos |
-|---|---|
-| Ciclo del envío | registrado → recogido → en almacén → en ruta → entregado, o intento fallido y vuelta a ruta; al tercer fallo, devuelto. 2.5% se cancela |
-| Promesa | mismo día, express (día hábil siguiente) o estándar (2 días hábiles; 3 en provincia). Lo registrado después de las 15:00 cuenta desde el día siguiente. No se reparte domingos ni feriados |
-| Campaña de ofertas, 14 al 16 de julio | Los registros se duplican y el reparto no da abasto: las promesas del 15 al 20 de julio cierran con 73.1% a tiempo, contra ~90% el resto del periodo |
-| Entregas sin señal | La hora de entrega (`entregado_en`) es la real; el commit llega cuando el celular sincroniza: 3% de las entregas en Lima centro, 10% en la periferia, 18% en provincia |
-| Intentos fallidos | Más en la periferia y en envíos contra entrega |
-| Borrados | Operaciones borra cada lunes los envíos de prueba del cliente QA: 363 eventos `d` |
-| Conector | 10,179 eventos llegan uno o más lotes tarde (1.6%) y 2,363 llegan duplicados; tres reinicios reenvían las últimas dos horas del lote anterior (el del 19 de agosto, 1,048 eventos) |
+[`generar_datos.py`](datos/generar_datos.py) simula primero la base transaccional, con la vida completa de cada envío, y después el conector que la convierte en archivos. Semilla fija, unos 45 segundos. Del 1 de julio al 31 de octubre de 2026 salen 124,468 envíos y 637,279 eventos de cambio en 492 lotes de 6 horas, 40 MB en archivos.
 
-Y cuatro incidentes de origen con fecha conocida. El pipeline no sabe de ellos; los tiene que encontrar el contrato.
+Hay una campaña de ofertas en julio que satura el reparto, entregas sin señal que sincronizan tarde (18% en provincia) y un conector imperfecto: 10,179 eventos llegan uno o más lotes tarde y 2,363 llegan duplicados.
+
+Y cuatro incidentes de origen que el contrato tiene que encontrar solo.
 
 | Incidente | Qué pasa en origen |
 |---|---|
-| Peso en gramos, 18 al 20 ago | La app de agencias manda `peso_kg = 1500` en vez de 1.5 para 634 envíos. El 21 a las 11:00 un script lo corrige con un `UPDATE` |
+| Peso en gramos, 18 al 20 ago | La app de agencias manda `peso_kg = 1500` en vez de 1.5 para 634 envíos. El 21 a las 11:00 un script lo corrige |
 | Estados en mayúsculas, 6 oct 10:00-15:59 | Un deploy escribe `EN_RUTA`, `ENTREGADO`. A las 18:30 se normalizan en origen |
-| Distritos mal escritos | "Surco", "SJL", "San Martin de Porres" sin tilde, "Miraflores " con espacio. Nadie los corrige: 43 envíos |
+| Distritos mal escritos | "Surco", "SJL", "San Martin de Porres" sin tilde. Nadie los corrige: 43 envíos |
 | Columna nueva, 15 set 08:00 | Plataforma agrega `franja_horaria`. El contrato 1.1.0 que la declara rige desde el 17 |
 
-## Resultados
+## Qué pasó con los 492 lotes
 
-Corrí los 492 lotes en orden con `python -m lakehouse correr`: 427 segundos en total, 0.87 s por lote contando oro y el mantenimiento de los domingos.
+Los corrí en orden con `python -m lakehouse correr`: 427 segundos en total, 0.87 s por lote contando oro y el mantenimiento de los domingos.
 
 | | eventos |
 |---|---|
 | Leídos de los archivos | 639,642 |
 | Duplicados descartados | 2,363 |
-| Llegaron en un lote posterior | 10,174 |
 | Ignorados por lsn (plata ya tenía uno más nuevo) | 2,453 |
 | En cuarentena | 6,085 |
 | Insertados / actualizados / borrados en plata | 124,425 / 358,743 / 363 |
 | Cambios de estado en el historial | 631,254 |
 
-![CDC](docs/img/app_cdc.png)
+Lo que más me importaba era el orden. Aplicar el CDC en el orden en que llega, como hacía el `MERGE` original, deja 1,096 envíos con el estado equivocado; 1,064 son entregados que figuran como no entregados, 973 de ellos `en_ruta`, porque ese evento llegó un lote después del de `entregado`. Con la guarda de `lsn` son 0. Para el tablero de OTD eran casi nueve décimas de punto de cumplimiento que no existían.
 
-Lo que encontré:
+Al final hay 124,105 envíos en origen y 124,062 en plata. Los 43 que faltan son los de distrito mal escrito, en cuarentena, y en los demás no difiere ninguna de las 15 columnas. El contrato agarró el peso en gramos en el lote de las 12:00 del 18 de agosto (15 lotes pasaron el umbral de 2%, el peor con 20.3%) y los estados en mayúsculas llegaron a 73.9% del lote de las 18:00 del 6 de octubre. Cuando origen mandó la corrección, plata la tomó sola. Con `franja_horaria` el pipeline avisó en cada lote y la dejó en bronce hasta que rigió la 1.1.0; ese día plata agregó la columna y 2,023 envíos que ya no iban a recibir eventos se rellenaron desde bronce.
 
-- **Plata cuadra con origen.** Al final hay 124,105 envíos en origen y 124,062 en plata. Los 43 que faltan son exactamente los de distrito mal escrito, con todos sus eventos en cuarentena; ninguno sobra y ninguna columna difiere en los 124,062 que están en los dos lados. La conciliación compara las 15 columnas del contrato además de la clave.
-- **Aplicar el CDC en el orden en que llega deja 1,096 envíos con el estado equivocado.** Es lo que hacía el `MERGE` original: la última fila que llegó gana. 1,064 son envíos entregados que figuran como no entregados, 973 de ellos `en_ruta`, porque el evento de `en_ruta` llegó un lote tarde, después del de `entregado`. Con la guarda de `lsn` son 0. Para el tablero de OTD son casi nueve décimas de punto de cumplimiento que no existen.
-- **El contrato encontró los tres incidentes de datos en el primer lote afectado.** El peso en gramos aparece en el lote de las 12:00 del 18 de agosto y 15 lotes pasan el umbral de 2% en cuarentena (el peor, 20.3%). Los estados en mayúsculas llegan a 73.9% del lote de las 18:00 del 6 de octubre.
-- **Los incidentes que origen corrigió se recuperaron solos.** Cuando llega el `UPDATE` de corrección, es un evento válido con `lsn` mayor y plata toma la imagen completa. No hubo que reprocesar nada. El historial tampoco perdió los cambios de estado de los envíos con peso malo: cada regla declara qué columnas mira, y una regla de peso no invalida que el envío pasó a `en_ruta`.
-- **La columna nueva esperó al contrato y después se rellenó desde bronce.** Del 15 al 16 de setiembre `franja_horaria` llega en el JSON pero la versión vigente no la declara: el pipeline avisa en cada lote y la deja solo en bronce. El 17 rige la 1.1.0, plata agrega la columna (Iceberg no reescribe datos para eso) y 2,023 envíos que ya habían recibido su último evento se rellenan con el evento de bronce que los dejó en su estado actual. Sin bronce, esos 2,023 se quedaban en nulo y la conciliación no cuadraba.
+El OTD de la mañana siguiente se equivoca menos de lo que esperaba: entre el primer corte y el último, la brecha media es de 0.20 puntos en Lima centro y 0.43 en provincia. El peor día fue el 15 de setiembre, visto con 88.4% y cerrado en 89.2%. Lo que faltaba era saber qué número se vio, y eso lo da el tag.
 
-![Contrato y cuarentena](docs/img/app_contrato.png)
+Contra `Table.upsert` de pyiceberg, escribiendo `plata.envios` en los primeros 124 lotes, mi upsert por partición tardó 34 segundos y el otro 984: busca las claves en toda la tabla y además no sabe de `lsn`. Se reproduce con `python -m lakehouse comparar-upsert`.
 
-- **El OTD de la mañana siguiente se equivoca poco, y casi siempre para abajo.** Comparo cada día de promesa visto en el primer corte (06:00 del día siguiente) contra el último. La brecha media es de 0.20 puntos en Lima centro y 0.43 en provincia; el p90 en provincia, 1.10 puntos. El peor día fue el 15 de setiembre: el tablero dijo 88.4% y terminó en 89.2%. Esperaba más: la mayoría de entregas sin señal sincroniza antes de las 6 de la mañana. Lo que sí importa es poder responder qué número se vio, y eso lo da el tag del corte.
+El mantenimiento sí pesa. Corrí los mismos lotes otra vez con `correr --sin-mantenimiento` en otra carpeta:
 
-![Viaje en el tiempo](docs/img/app_viaje.png)
-
-- **`Table.upsert` de pyiceberg no aguanta un lote cada 6 horas.** Con los mismos eventos ya validados, medí solo la escritura de `plata.envios` en los primeros 124 lotes (julio):
-
-| Lotes | Filas en plata al final | Upsert por partición (s/lote) | `Table.upsert` (s/lote) |
-|---|---|---|---|
-| 1-28 | 6,631 | 0.14 | 1.21 |
-| 29-56 | 15,124 | 0.24 | 4.99 |
-| 57-84 | 24,709 | 0.31 | 11.21 |
-| 85-112 | 30,518 | 0.37 | 10.59 |
-| 113-124 | 33,050 | 0.41 | 16.69 |
-
-  En total, 34 segundos contra 984; el lote más pesado de `Table.upsert` tardó 45 segundos. `Table.upsert` busca las claves en toda la tabla y su tiempo crece con ella; el upsert por partición solo lee los días que el lote toca. Además `Table.upsert` no sabe de `lsn`: aplicaría el evento tardío encima del nuevo. Se reproduce con `python -m lakehouse comparar-upsert`.
-
-- **Sin mantenimiento, la ingesta se vuelve 5 veces más lenta en cuatro meses.** Corrí los mismos 492 lotes dos veces, con y sin el mantenimiento de los domingos (`correr --sin-mantenimiento` en otra carpeta de datos):
+```mermaid
+xychart-beta
+    title "Tiempo total de los 492 lotes (s)"
+    x-axis ["Con mantenimiento", "Sin mantenimiento"]
+    y-axis "segundos" 0 --> 1000
+    bar [427, 942]
+```
 
 | | con mantenimiento | sin mantenimiento |
 |---|---|---|
-| Tiempo total de los 492 lotes | 427 s | 942 s |
 | Mediana por lote en julio / octubre | 0.41 s / 0.48 s | 0.75 s / 2.62 s |
-| Archivos de datos en bronce / historial | 31 / 31 | 492 / 503 |
 | Snapshots en plata | 57 | 985 |
 | metadata.json de plata | 47 KB | 672 KB |
-| Leer bronce completo (639,642 filas) | 0.59 s | 2.28 s |
-| Leer el historial completo (631,254 filas) | 0.11 s | 1.34 s |
 | Archivos en disco / tamaño del warehouse | 1,611 / 90 MB | 9,978 / 254 MB |
 
-  Con mantenimiento el tiempo por lote se queda plano desde agosto; sin él crece todos los meses, en todos los pasos: leer bronce para deduplicar, abrir los días de plata, escribir el historial. Cada commit reescribe un metadata.json que lista todos los snapshots, y cada lectura abre un manifiesto por lote. Compactar no cambia los datos: hay un test que lo compara fila por fila.
+Sin compactar, cada commit reescribe un metadata.json con todos los snapshots y cada lectura abre un manifiesto por lote. Un test confirma que compactar no cambia ni una fila.
 
-![Mantenimiento](docs/img/app_mantenimiento.png)
+## Por qué lo armé así
 
-## Decisiones de diseño
+Usé pyiceberg con un catálogo SQLite para que corra en una laptop sin Spark, y DuckDB para las transformaciones sobre Arrow. Las tablas son Iceberg v2 estándar y se pueden leer desde Trino, Spark o DuckDB.
 
-- **Iceberg con pyiceberg y un catálogo SQLite.** Corre en una laptop sin Spark ni servidor. Las tablas son Iceberg v2 estándar: el mismo `warehouse` se puede registrar en un catálogo REST, Glue o Polaris y leerse desde Trino, Spark o DuckDB. DuckDB hace las transformaciones sobre Arrow.
-- **Bronce guarda todo, incluso duplicados.** Deduplicar en bronce parece limpio, pero bronce es lo que me dejó rellenar `franja_horaria` y es lo que le muestro a Plataforma cuando hay un reclamo. El costo es 2,363 filas de 639,642.
-- **El orden lo da el `lsn`, no la hora.** La hora de commit puede repetirse y la de los eventos de negocio (`entregado_en`) no dice en qué orden se escribió la fila. El `lsn` es la posición en el log de la base: es la única que ordena sin ambigüedad.
-- **La marca de agua vive en la tabla.** Cada tabla guarda el último lote aplicado en sus propiedades, en la misma transacción que los datos. Si el proceso se cae entre plata y el historial, la siguiente corrida retoma cada tabla desde su marca; hay un test que simula esa caída. Volver a correr un lote ya aplicado no crea ni un snapshot.
-- **Upsert copy-on-write por día de registro, propio.** La fecha de registro no cambia, así que sirve de partición estable: un lote toca a lo más 11 días (la mediana es 7) y se reescriben solo esos. Además de ser más rápido que `Table.upsert`, permite la guarda de `lsn`.
-- **Cuarentena por evento y reglas por columna.** Un lote con eventos malos no se detiene: los buenos pasan y los malos quedan con su motivo. El chequeo del lote (umbral de 2%) es el que avisa; en Dagster es un `asset_check` con severidad de advertencia.
-- **El contrato en YAML, con fechas de vigencia.** Lo pueden leer y aprobar Plataforma y Datos en un PR. Las fechas permiten reprocesar el pasado con la versión que regía, y que una columna nueva no entre a plata hasta que alguien la declare.
-- **Tags en vez de retener snapshots por antigüedad.** Para responder qué decía el tablero el 16 de agosto solo necesito un snapshot por mañana. Expirar respeta los tags, así que oro conserva 123 cortes y el resto se limpia.
-- **Huérfanos a mano.** pyiceberg expira snapshots pero no borra los archivos que dejan de usarse. Lo hago en [`mantenimiento.py`](src/lakehouse/mantenimiento.py) comparando contra todos los archivos, manifiestos y metadata que referencian los snapshots vivos. Solo es seguro con un único escritor.
+Bronce guarda todo, incluso duplicados: 2,363 filas de 639,642 a cambio de poder rellenar `franja_horaria` y tener evidencia para Plataforma.
+
+El orden lo da el `lsn` y no la hora. La hora de commit se repite y `entregado_en` no dice en qué orden se escribió la fila; el `lsn` es la posición en el log de la base.
+
+La marca de agua vive en las propiedades de cada tabla, en la misma transacción que los datos. Si el proceso se cae a medio lote, la siguiente corrida retoma cada tabla desde su marca, y repetir un lote ya aplicado no crea ni un snapshot.
+
+Particioné por día de registro porque esa fecha no cambia; un lote toca a lo más 11 días y solo esos se reescriben. Para la historia uso tags en vez de retener por antigüedad, y oro conserva 123 cortes. pyiceberg no borra huérfanos, así que lo hago a mano comparando contra todo lo que referencian los snapshots vivos, lo que solo es seguro con un único escritor.
 
 ## Correrlo
 
@@ -158,8 +162,6 @@ dagster dev -m lakehouse.definiciones        # assets, chequeos, sensor y manten
 streamlit run app.py
 pytest                                       # 41 tests, ~45 s
 ```
-
-![CLI](docs/img/cli.png)
 
 ## Estructura
 
@@ -187,18 +189,19 @@ pytest                                       # 41 tests, ~45 s
 └── tests/                      contrato, ingesta (tardíos, duplicados, caídas, esquema), pipeline, generador, cli, dagster
 ```
 
-## Limitaciones
+## Lo que no resuelve
 
-- **Un solo escritor.** El catálogo SQLite y el borrado de huérfanos asumen que nadie más escribe. Con escritores concurrentes hace falta un catálogo con commits atómicos de verdad (REST, Glue) y dejar los huérfanos para cuando no haya commits en curso.
-- **pyiceberg no reescribe manifiestos.** Plata termina con 93 manifiestos para 117 archivos, porque cada lote reescribe días y deja un manifiesto nuevo. En Spark se resuelve con `rewrite_manifests`; aquí, con este volumen, todavía no pesa.
-- **La retención se cuenta en snapshots, no en días.** La simulación comprime cuatro meses en minutos, así que `older_than` no tenía sentido. En producción sería `older_than` de 7 días más los tags.
-- **Oro recalcula 35 días hacia atrás.** Una entrega que sincroniza más tarde que eso no cambia el día de su promesa. En los datos no pasa; con datos reales habría que medirlo.
-- **Las erratas de distrito se quedan en cuarentena para siempre.** Una regla de normalización (trim, tildes, alias como "SJL") en el contrato recuperaría los 43 envíos, pero eso es decisión de Plataforma, no un arreglo silencioso en Datos.
-- **El CDC es simulado.** Los archivos tienen el formato de Debezium pero no salieron de Debezium ni de Kafka.
+Asume un solo escritor. Con varios haría falta un catálogo con commits atómicos (REST, Glue) y otro manejo de huérfanos.
 
-## Lo que sigue
+pyiceberg no reescribe manifiestos, y plata termina con 93 manifiestos para 117 archivos. Con este volumen todavía no pesa; en Spark sería `rewrite_manifests`.
 
-- Leer el CDC directo de Kafka con un consumidor que confirme el offset en la misma transacción que la marca de agua.
-- Pasar el catálogo a REST (Lakekeeper o Polaris) y consultar las tablas desde Trino o desde la extensión de Iceberg de DuckDB.
-- Agregar al contrato las reglas de transición de estado (un envío entregado no vuelve a ruta) como chequeo de advertencia.
+La retención se cuenta en snapshots porque la simulación comprime cuatro meses en minutos; en producción sería `older_than` de 7 días más los tags. Oro recalcula 35 días hacia atrás, y una entrega que sincronice más tarde ya no cuenta; con datos reales habría que medirlo.
+
+Los 43 envíos con distrito mal escrito se quedan en cuarentena. Una regla de normalización en el contrato los recuperaría, pero esa decisión le toca a Plataforma. Y el CDC es simulado, con formato Debezium pero sin Debezium ni Kafka.
+
+## Siguiente
+
+- Leer el CDC directo de Kafka, confirmando el offset en la misma transacción que la marca de agua.
+- Pasar el catálogo a REST (Lakekeeper o Polaris) y consultar desde Trino o la extensión de Iceberg de DuckDB.
+- Agregar al contrato reglas de transición de estado, como que un envío entregado no vuelve a ruta.
 - Que la capa semántica del proyecto 05 lea oro en vez de su propia base.

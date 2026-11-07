@@ -1,80 +1,87 @@
 # Lectura de experimentos A/B para una app de delivery
 
-Toma los experimentos que corrió un equipo de producto, revisa que la asignación esté sana, mide el efecto con CUPED y método delta, aplica una regla de decisión escrita de antemano y deja un readout en Markdown por experimento. Incluye un estudio A/A que mide cuánto se equivoca uno al mirar el tablero todos los días.
+Chasqui es una app de delivery ficticia que opera en Lima, Arequipa, Trujillo y Piura. En 2026 su equipo de producto corrió cinco experimentos de cuatro semanas. Cada uno lo leía quien había propuesto el cambio, mirando un dashboard cada mañana, y las discusiones se repetían. Que ayer salió p = 0.03 y ya se puede parar. Que sube el GMV pero baja el margen. Que en Lima funciona y en provincia no. Que el tratamiento tiene 1,700 usuarios menos que el control y nadie sabe si eso importa.
 
-![Catálogo de experimentos](docs/img/app_catalogo.png)
+Armé este proyecto para que la lectura no dependa de quién la haga: los mismos chequeos, métricas definidas en SQL y una regla de decisión fijada antes de ver los datos, con un readout en Markdown por experimento. También hay un estudio A/A que mide cuánto se equivoca uno cuando revisa el tablero todos los días.
 
-## El problema
+## Cómo queda el proceso
 
-Chasqui (app ficticia) opera delivery en Lima, Arequipa, Trujillo y Piura. En 2026 el equipo de producto corrió cinco experimentos de cuatro semanas cada uno. La lectura la hacía quien había propuesto el cambio, mirando un dashboard cada mañana, y cada vez se discutía lo mismo:
-
-- ¿Paramos ya? Ayer salió p = 0.03.
-- Sube el GMV, pero el margen baja. ¿Lanzamos o no?
-- En Lima funciona y en provincia no. ¿Lo lanzamos solo en Lima?
-- El grupo tratamiento tiene 1,700 usuarios menos que el control. ¿Importa?
-
-Quería una lectura que no dependa de quién la haga: los mismos chequeos para todos, las mismas métricas definidas en SQL y una regla de decisión fija antes de ver los datos.
-
-## Qué hace
+Producto declara qué va a medir y cuánto daño tolera antes de lanzar, y la lectura sigue un orden fijo.
 
 ```mermaid
 flowchart LR
-    gen[generar_datos.py<br/>usuarios, sesiones, pedidos<br/>y 5 experimentos] --> db[(chasqui.duckdb)]
-    db --> sql[métricas por usuario en SQL<br/>ventana desde la exposición<br/>+ 28 días previos]
-    sql --> srm{SRM}
-    srm -- p < 0.001 --> inv[invalidar]
-    srm -- ok --> est[CUPED · método delta<br/>segmentos con BH<br/>efecto por semana · mSPRT]
-    est --> dec[regla de decisión<br/>primaria + guardrails]
-    dec --> out[readout .md · Streamlit · CLI]
-    db --> aa[estudio A/A<br/>2,000 repartos]
+    subgraph P[Producto]
+        A((Inicio)) --> B[Proponer cambio]
+        B --> C[Declarar primaria,<br/>guardrails y márgenes]
+        C --> D[Definir duración<br/>con el MDE]
+        R[Decidir lanzamiento] --> Z(((Fin)))
+    end
+    subgraph S[Sistema]
+        E[Asignar por hash<br/>usuario y experimento] --> F[Registrar primera<br/>exposición]
+        F --> G[Calcular métricas<br/>por usuario en SQL]
+        G --> H[Actualizar p-valor<br/>mSPRT cada día]
+    end
+    subgraph AN[Analista]
+        I{¿SRM con<br/>p menor a 0.001?}
+        I -- Sí --> J[Invalidar y buscar<br/>el bug por versión]
+        I -- No --> K{¿Algún guardrail<br/>con daño?}
+        K -- Sí --> N[Recomendar<br/>no lanzar]
+        K -- No --> L{¿Primaria<br/>positiva?}
+        L -- No --> N
+        L -- Sí --> M{¿Guardrails dentro<br/>de su margen?}
+        M -- No se sabe --> O[Extender<br/>el experimento]
+        M -- Sí --> Q[Revisar efecto<br/>por semana]
+        Q --> T[Publicar readout]
+        N --> T
+        J --> T
+    end
+    D --> E
+    H --> I
+    O --> E
+    T --> R
+    classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
+    class B,C,D,E,F,G,H,J,N,O,Q,T,R sobrio
 ```
 
-- **Métricas por usuario expuesto**, armadas en SQL ([`metricas.py`](src/experimentos/metricas.py)): cada usuario cuenta sus pedidos desde el día de su primera exposición hasta el fin de la ventana. La covariable de CUPED es la misma métrica en los 28 días previos al inicio.
-- **SRM** (Sample Ratio Mismatch) con chi-cuadrado, y desglosado por versión de la app para ubicar el problema.
-- **CUPED** en las métricas por usuario y **método delta** en las de ratio (ticket promedio, tasa de cancelación), donde la unidad de aleatorización es el usuario y no el pedido.
-- **Guardrails de no inferioridad**: cada experimento declara cuánto daño tolera en cada guardrail (por ejemplo, margen -3%) y se evalúa el extremo malo del intervalo.
-- **Segmentos** (región, usuario nuevo o recurrente, plataforma) con q-valores de Benjamini-Hochberg.
-- **Efecto por semana desde la exposición**, para detectar efecto novedad.
-- **Lectura secuencial con mSPRT**: un p-valor que se puede mirar a diario sin inflar los falsos positivos.
-- **Readout en Markdown** por experimento, listo para pegar en el canal del equipo.
-
-La regla de decisión ([`decision.py`](src/experimentos/decision.py)):
+La regla vive en [`decision.py`](src/experimentos/decision.py) y tiene un test por cada rama. Si alguien quiere cambiarla, abre un PR.
 
 | Condición | Veredicto |
 |---|---|
-| SRM con p < 0.001 | invalidar (no se lee nada más) |
+| SRM con p < 0.001 | invalidar, no se lee nada más |
 | Algún guardrail con daño significativo | no lanzar |
 | Primaria positiva y guardrails dentro de su margen | lanzar |
 | Primaria positiva y algún guardrail sin concluir | extender |
 | Primaria sin efecto o negativa | no lanzar |
 
-## Datos
+## Por dentro
 
-150 mil usuarios, 1.05 millones de pedidos y 284 mil exposiciones a experimentos, del 1 de diciembre de 2025 al 27 de setiembre de 2026. Todo sale de [`generar_datos.py`](datos/generar_datos.py) con semilla fija, en unos 4 segundos.
+```mermaid
+flowchart LR
+    gen[generar_datos.py<br/>usuarios, sesiones, pedidos<br/>y 5 experimentos] --> db[(chasqui.duckdb)]
+    db --> sql[métricas por usuario en SQL<br/>ventana desde la exposición<br/>y 28 días previos]
+    sql --> srm{SRM}
+    srm -- p < 0.001 --> inv[invalidar]
+    srm -- ok --> est[CUPED y método delta<br/>segmentos con BH<br/>efecto por semana, mSPRT]
+    est --> dec[regla de decisión<br/>primaria y guardrails]
+    dec --> out[readout .md, Streamlit, CLI]
+    db --> aa[estudio A/A<br/>2,000 repartos]
+```
 
-El generador simula por usuario y por día si abre la app y, si abre, si pide. Cada experimento asigna con el mismo hash que usa el análisis ([`asignacion.py`](src/experimentos/asignacion.py)) y registra la primera sesión dentro de la ventana como exposición. Los efectos verdaderos quedan en la tabla `efectos_reales`, que el análisis no lee; sirve para comprobar si la lectura los recupera.
+La unidad de análisis es el usuario expuesto, porque es lo que se aleatoriza. En [`metricas.py`](src/experimentos/metricas.py) cada usuario acumula sus pedidos desde el día de su primera exposición hasta el fin de la ventana; un pedido anterior a ver el cambio no puede ser efecto del cambio. La covariable de CUPED es la misma métrica en los 28 días previos y el θ se estima con los dos grupos juntos para que el estimador siga insesgado. Las métricas de ratio, como ticket promedio o tasa de cancelación, se calculan como suma sobre suma por grupo con varianza por método delta, contrastada en los tests con un bootstrap por usuario.
 
-| Patrón | En los datos |
-|---|---|
-| Pocos usuarios piden mucho | El 10% más activo hace el 45.7% de los pedidos de 2026 |
-| Fin de semana | El sábado entran 4,407 pedidos por día; el martes, 2,932 |
-| Quincena | Los días 1, 15, 16 y fin de mes tienen 11% más pedidos que el resto |
-| Estacionalidad y crecimiento | 2,836 pedidos por día en febrero, 4,230 en julio (frío y Fiestas Patrias) |
-| Lima vs provincia | Ticket de S/ 41.9 en Lima y S/ 34.0 en provincia; en Lima cada usuario pide 26% más seguido |
-| Usuarios nuevos | 30% se registró durante el periodo, con un primer mes más activo |
-| Persistencia | La correlación entre los pedidos de 4 semanas y los de las 4 previas es 0.57: es lo que aprovecha CUPED |
+Los guardrails se evalúan como no inferioridad. Cada experimento declara cuánto daño tolera, por ejemplo margen -3%, y se mira el extremo malo del intervalo. Un guardrail con IC ancho no pasa solo por no ser significativo; queda sin concluir y el veredicto es extender.
 
-| Experimento | Efecto real en el generador |
-|---|---|
-| EXP-01 Checkout en una pantalla | +2% en la probabilidad de pedir |
-| EXP-02 Envío gratis desde S/ 35 | Carritos de S/ 24 a 35 que suben al umbral (30% en Lima, 40% en provincia), +3% de pedidos, el comercio cofinancia 75% de la tarifa |
-| EXP-03 Recomendados en el carrito | Ticket +0.8% + 9%·e^(-días/5): fuerte la primera semana, casi nada después |
-| EXP-04 ETA optimista | +3.5% de pedidos, cancelación x1.55 |
-| EXP-05 Propina sugerida | Ninguno. Bug de logging: en Android antiguo, el tratamiento registra la exposición recién en la segunda sesión |
+Para el mSPRT usé τ = 5% de la media del control y verifiqué la garantía con el A/A, porque con métricas acumuladas no me fié de la teoría. Los segmentos (región, nuevo o recurrente, plataforma) salen con q-valores de Benjamini-Hochberg.
 
-## Resultados
+## Los datos
 
-![Lectura de un experimento](docs/img/app_experimento.png)
+150 mil usuarios, 1.05 millones de pedidos y 284 mil exposiciones, del 1 de diciembre de 2025 al 27 de setiembre de 2026, generados con semilla fija por [`generar_datos.py`](datos/generar_datos.py). Asigna con el mismo hash que usa el análisis ([`asignacion.py`](src/experimentos/asignacion.py)).
+
+Traté de que se parezca a un delivery de verdad: el 10% más activo hace el 45.7% de los pedidos de 2026 y el ticket es de S/ 41.9 en Lima y S/ 34.0 en provincia. La correlación entre los pedidos de 4 semanas y los de las 4 previas es 0.57, que es justo lo que aprovecha CUPED.
+
+Los efectos verdaderos quedan en la tabla `efectos_reales`, que el análisis nunca lee. EXP-01 sube 2% la probabilidad de pedir. EXP-04 sube 3.5% los pedidos pero multiplica la cancelación por 1.55. EXP-05 no tiene efecto, pero sí un bug de logging: en Android antiguo el tratamiento registra la exposición recién en la segunda sesión.
+
+## Qué salió
 
 | Experimento | Expuestos | SRM p | Primaria | Efecto (CUPED) | IC 95% | Veredicto |
 |---|---:|---:|---|---:|---|---|
@@ -84,36 +91,25 @@ El generador simula por usuario y por día si abre la app y, si abre, si pide. C
 | EXP-04 ETA optimista | 61,996 | 0.63 | pedidos por usuario | +2.3% | +0.7% a +4.0% | no lanzar |
 | EXP-05 Propina sugerida | 60,731 | 2.9e-12 | pedidos por usuario | +0.3% | -1.5% a +2.1% | invalidar |
 
-Lo que encontré:
+Lo que más quería medir era el costo de mirar el tablero a diario. En el A/A hice 2,000 repartos al azar de 46,792 usuarios de un periodo sin experimentos. Con una sola lectura al día 28 hay 5.1% de falsos positivos, como corresponde. Si uno revisa todos los días y para apenas ve p < 0.05, al día 7 ya va en 16.5% y al día 28 en **26.2%**. Con mSPRT mirando a diario se queda en 1.7%.
 
-- **Mirar el tablero cada día y parar al primer p < 0.05 convierte un 5% de error en 26%.** En el estudio A/A (2,000 repartos al azar de 46,792 usuarios reales de un periodo sin experimentos) una sola lectura al día 28 da 5.1% de falsos positivos, como debe ser. Revisando todos los días y parando apenas aparece significancia, al día 7 ya van 16.5% y al día 28, 26.2%. Con mSPRT mirando a diario: 1.7%.
-- **EXP-05 parecía un ganador y era un bug.** Sin CUPED, pedidos por usuario sube 2.2% (p = 0.043) y GMV 3.3% (p = 0.006). El SRM salta (48.6% en tratamiento) y el desglose lo ubica: en Android antiguo el tratamiento tiene 35.8% de los expuestos; en Android nuevo e iOS, 50.0% y 50.3%. El bug registraba solo a quienes abrían la app dos veces, o sea a los más activos. CUPED baja el falso efecto en pedidos a +0.3%, pero no lo arregla: la conversión sigue saliendo +1.6% con p = 0.003. Por eso el SRM va primero y no se negocia.
-- **EXP-02 sube el GMV y se come el margen.** GMV +5.6%, ticket +2.8% y pedidos +3.2%: la gente completa el carrito para llegar a S/ 35 (los pedidos de S/ 35 o más pasan de 51.9% a 62.2%). Pero la tarifa promedio cobrada cae de S/ 5.59 a S/ 2.09 y el margen por usuario baja 7.9% (IC -9.8% a -6.1%), contra un daño tolerado de 3%. El veredicto es no lanzar tal cual; lo que sigue es probar un umbral más alto.
-- **EXP-03 se lanza, pero el +4.4% del mes no es lo que va a quedar.** La primera semana desde la exposición el GMV sube 8.2%; de la segunda en adelante, 1.4% (IC -1.1% a +3.9%). La regla de decisión lo marca como alerta de novedad. El generador tiene justamente eso: un efecto que se apaga en días.
-- **EXP-04 vende más pedidos con una promesa que no cumple.** Pedidos +2.3%, pero la cancelación pasa de 3.15% a 4.92% (+56%). El margen incluso sube 2.3% porque un pedido cancelado no cuesta rider; el guardrail de cancelación es el que frena el lanzamiento.
-- **EXP-01 no tenía cómo detectar su efecto.** El efecto real era +2% y la lectura da +1.2% con un IC de -0.8% a +3.2%. Con el tráfico de cuatro semanas (unos 24,700 usuarios por grupo) el efecto mínimo detectable es 2.8% con CUPED y 3.4% sin él. Para ver +2% hacían falta 46,683 usuarios por grupo con CUPED (69,033 sin CUPED). Ese cálculo se hace antes de lanzar, no después; la pestaña Planificar está para eso.
-- **CUPED baja la varianza de la primaria entre 29% y 42%**, según el experimento. En EXP-01 el error estándar del efecto pasa de 1.22% a 1.03% de la media. Probé una ventana previa de 56 días en vez de 28: la correlación sube de 0.57 a 0.59 y el MDE a 4 semanas apenas baja de 2.83% a 2.78%, así que me quedé con 28.
-- **"Significativo en Lima y no en provincia" no es lo mismo que "funciona solo en Lima".** En EXP-04, Lima da +3.3% (q = 0.007) y provincia +0.3% (IC -2.5% a +3.1%). El generador no tiene ninguna diferencia por región: el efecto es el mismo en todas partes. Los segmentos se reportan con su q-valor para dar contexto, no para buscar dónde lanzar.
+```mermaid
+xychart-beta
+    title "Falsos positivos en el A/A (%)"
+    x-axis ["Una lectura", "Diario al día 7", "Diario al día 28", "mSPRT diario"]
+    y-axis "Porcentaje" 0 --> 30
+    bar [5.1, 16.5, 26.2, 1.7]
+```
 
-![SRM en EXP-05](docs/img/app_srm.png)
+EXP-05 parecía un ganador, con GMV +3.3% (p = 0.006) sin CUPED. Pero el SRM salta con 48.6% en tratamiento, y al desglosar por versión el problema aparece en Android antiguo, donde el tratamiento tiene 35.8% de los expuestos contra 50.0% y 50.3% en Android nuevo e iOS. El bug solo registraba a quienes abrían la app dos veces, que son los más activos. CUPED baja el falso efecto en pedidos a +0.3%, pero la conversión sigue saliendo +1.6% con p = 0.003. Por eso el SRM se revisa primero y no se negocia.
 
-![Estudio A/A](docs/img/app_aa.png)
+EXP-02 sube el GMV 5.6% porque la gente completa el carrito para llegar a S/ 35. El problema es que la tarifa promedio cobrada cae de S/ 5.59 a S/ 2.09 y el margen por usuario baja 7.9% (IC -9.8% a -6.1%), cuando lo tolerado era 3%. Lo que toca es probar un umbral más alto. EXP-04 vende 2.3% más pedidos con una promesa que no cumple, y la cancelación pasa de 3.15% a 4.92%.
 
-### Parar antes
+EXP-03 sí se lanza, aunque el +4.4% del mes no es lo que va a quedar. La primera semana desde la exposición el GMV sube 8.2% y de la segunda en adelante 1.4% (IC -1.1% a +3.9%). En EXP-01 el efecto real era +2%, y con unos 24,700 usuarios por grupo el mínimo detectable era 2.8% con CUPED. Para verlo hacían falta 46,683 usuarios por grupo con CUPED. Esa cuenta se hace antes de lanzar, y para eso está la pestaña Planificar.
 
-El mSPRT permite revisar el resultado cada mañana. Exigiendo al menos una semana completa (el efecto de un lunes no es el de un sábado), EXP-02, EXP-03 y EXP-04 podían cerrarse el día 7 en la métrica primaria. Con el p-valor clásico, EXP-02 y EXP-03 ya daban p < 0.05 el primer día, y en EXP-03 parar ahí habría reportado el efecto inflado por la novedad. Parar antes solo aplica si los guardrails también están leídos: en EXP-04 la primaria cruzó el día 7, pero lo que decide es la cancelación.
+Con el mSPRT, exigiendo al menos una semana completa, EXP-02, EXP-03 y EXP-04 podían cerrarse el día 7. Pero en EXP-04 quien decide es la cancelación, así que parar antes solo vale si los guardrails también están leídos.
 
-## Decisiones de diseño
-
-- **La unidad es el usuario, no el pedido.** Es lo que se aleatoriza. Las métricas de ratio (ticket, cancelación) se calculan como suma sobre suma por grupo y su varianza con método delta; tratar cada pedido como observación independiente subestima el error. Hay un test que compara el método delta contra un bootstrap por usuario.
-- **Ventana desde la exposición de cada usuario**, no desde el inicio del experimento. Un pedido anterior a que el usuario vea el cambio no puede ser efecto del cambio, y meterlo diluye la diferencia.
-- **θ de CUPED estimado con los dos grupos juntos.** Así no depende de la asignación y el estimador sigue siendo insesgado; el test lo verifica con 300 simulaciones.
-- **Guardrails como no inferioridad y no como "que no sea significativo".** Un guardrail con IC ancho no "pasa" por no ser significativo: si el extremo malo supera el margen, queda sin concluir y el veredicto es extender.
-- **mSPRT con τ = 5% de la media del control.** τ es el tamaño de efecto donde el test tiene más potencia. Como las métricas son acumuladas y su nivel crece con los días, la garantía no sale del libro: la verifiqué con el A/A sobre los datos reales. El intervalo siempre válido no se intersecta entre días, porque con novedad el estimando cambia.
-- **La regla de decisión está en código**, con un test por cada rama. Cambiarla es un PR, no una conversación.
-- **El readout sale de la misma lectura que el tablero**, así no hay dos versiones de una cifra.
-
-## Correrlo
+## Para correrlo
 
 Python 3.10+.
 
@@ -133,11 +129,7 @@ streamlit run app.py
 pytest                                  # 31 tests, ~6 s
 ```
 
-`generar --escala 0.2` arma una base más chica para probar. Los resultados quedan en `datos/resultados.duckdb`, que es lo que lee la app.
-
-![CLI](docs/img/cli.png)
-
-## Estructura
+`generar --escala 0.2` arma una base chica. Los resultados quedan en `datos/resultados.duckdb`, que es lo que lee la app.
 
 ```
 04-experimentos-ab-delivery/
@@ -159,20 +151,10 @@ pytest                                  # 31 tests, ~6 s
 └── tests/                     asignación, estadística, SQL, decisión, generador, análisis, cli
 ```
 
-![Planificar](docs/img/app_planificar.png)
+## Hasta dónde llega
 
-## Limitaciones
+Conozco los efectos reales porque los datos son sintéticos. Con datos de verdad la única forma de calibrar la lectura es el A/A y, si existe, un histórico de experimentos con resultado conocido.
 
-- **Los efectos reales se conocen porque los datos son sintéticos.** Con datos reales, la única forma de calibrar la lectura es el A/A y, si existe, un histórico de experimentos con resultados conocidos.
-- **No hay interacción entre experimentos.** Aquí corren en ventanas separadas; con experimentos en paralelo sobre los mismos usuarios habría que revisar interacciones o usar capas de asignación.
-- **El efecto es sobre la ventana de cuatro semanas.** No mide efectos de largo plazo (retención a 3 meses, hábito). Para eso se usa un holdout que se queda sin el cambio varios meses.
-- **Las métricas de ratio no llevan CUPED.** Se puede combinar con el método delta (ajustando numerador y denominador), pero aquí las de ratio son guardrails o secundarias.
-- **El SRM detecta el desbalance, no lo corrige.** Si el bug es de logging, a veces se puede reconstruir la exposición desde otro evento; aquí el veredicto es no leer y volver a correr.
-- Los segmentos son fijos. Buscar el segmento ganador entre muchos es la forma más rápida de encontrar ruido.
+Los experimentos corren en ventanas separadas; con varios en paralelo sobre los mismos usuarios harían falta capas de asignación. Tampoco mido nada más allá de las cuatro semanas; retención o hábito necesitan un holdout de varios meses. Las métricas de ratio van sin CUPED, y el SRM detecta el desbalance pero no lo corrige.
 
-## Lo que sigue
-
-- Capa semántica de métricas (definición única en YAML) que use el análisis y el dashboard del negocio.
-- CUPED con varias covariables (regresión) y para métricas de ratio.
-- Holdout de largo plazo para los cambios que se lanzan.
-- Programar `python -m experimentos analizar` cada mañana y mandar el readout al canal cuando un experimento cruza su umbral o salta el SRM.
+Lo próximo que haría es una capa semántica de métricas en YAML que compartan el análisis y el dashboard del negocio, CUPED con varias covariables, y programar `python -m experimentos analizar` cada mañana para que mande el readout al canal cuando un experimento cruce su umbral o salte el SRM.
