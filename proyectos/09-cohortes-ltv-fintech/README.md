@@ -1,12 +1,48 @@
 # Cohortes y valor de vida en una billetera digital
 
-Ayni es una billetera ficticia con tarjeta prepago Visa: la gente recarga, compra con la tarjeta, recarga el celular, paga servicios y se transfiere plata. Gana por la comisión de intercambio de cada compra, por las recargas y por cada pago de servicio; las transferencias son gratis. Entre enero de 2025 y setiembre de 2026 gastó S/ 1.67 millones en conseguir clientes por seis canales pagados.
+Ayni es una billetera ficticia con tarjeta prepago Visa. Gana por la comisión de intercambio de cada compra con la tarjeta, por las recargas de celular y por cada pago de servicio; las transferencias son gratis. Entre enero de 2025 y setiembre de 2026 gastó S/ 1.67 millones en conseguir clientes por seis canales pagados.
 
-Marketing medía cada canal por su costo por cuenta activada (CAC). Con ese número TikTok era el canal más barato, entre S/ 13.50 y S/ 18.28 por cuenta en los meses sin campaña, y en 2026 se le pasó presupuesto: de 17.7% del gasto en 2025 a 27.4% entre enero y setiembre de 2026. Finanzas preguntaba otra cosa: cuánto deja cada cuenta después de activarse y en qué mes se recupera lo que costó traerla. Ninguno de los dos números existía, porque nadie había armado las cohortes por canal ni tenía una forma de proyectar el ingreso de clientes que llevan pocos meses.
+## Problemática
 
-Este proyecto arma las dos cosas. Las cohortes salen de SQL sobre DuckDB, y el valor futuro, de un MBG/NBD (con el canal como covariable) y un Gamma-Gamma ajustados con pymc-marketing. Antes de usar el modelo para decidir presupuesto, lo puse a predecir seis meses que no vio.
+El presupuesto de adquisición se repartía mirando una sola cifra: el costo por cuenta activada (CAC) de cada canal. Con ese criterio TikTok era el canal más barato, entre S/ 13.50 y S/ 18.28 por cuenta en los meses sin campaña, y en 2026 pasó de 17.7% a 27.4% del gasto. Google Search, el más caro, bajó de 16.3% a 13.6%.
 
-## Cómo se usaría cada cierre de mes
+El CAC dice cuánto cuesta traer a alguien, pero no cuánto deja después. Finanzas pedía saber en qué mes se recupera lo invertido en cada canal y nadie podía responder: no había cohortes por canal, el ingreso se veía en total y la única proyección disponible era estirar el ritmo de compra actual, que asume que nadie deja de usar la billetera. Tampoco se distinguía a los clientes valiosos que estaban dejando de comprar de los que ya se habían ido.
+
+## Solución
+
+Armé un análisis mensual de cohortes y valor de vida que reemplaza el ranking por CAC por un ranking por retorno: LTV a 24 meses contra CAC y mes de payback de cada canal. Las cohortes, el CAC y el payback observado salen de SQL sobre DuckDB. El valor futuro sale de un MBG/NBD con el canal como covariable y un Gamma-Gamma por canal (pymc-marketing), y antes de usarlo lo validé prediciendo seis meses que no vio.
+
+El alcance incluye el generador de datos, las consultas de cohortes, los modelos con su validación, la CLI, un tablero en Streamlit y una lista de clientes valiosos en riesgo para retención. Quedan fuera la atribución multicanal y el margen de contribución (fraude, emisión de tarjetas, atención), que se explican al final.
+
+## AS IS: el presupuesto se decide por CAC
+
+```mermaid
+flowchart LR
+    subgraph MK[Marketing]
+        A((Inicio<br/>cierre de mes)) --> B[Descargar gasto de<br/>cada plataforma]
+        B --> C[Contar activaciones<br/>por canal]
+        C --> D[Calcular CAC<br/>en Excel]
+        D --> E[Ordenar canales<br/>de menor a mayor CAC]
+        E --> F[Pasar presupuesto<br/>al canal más barato]
+    end
+    subgraph FI[Finanzas]
+        G[Pedir payback<br/>por canal] --> H{¿Hay ingreso<br/>por canal y cohorte?}
+        H -- No --> I[Proyectar con el<br/>ritmo de compra actual]
+        I --> J[Aprobar presupuesto<br/>sin retorno medido]
+    end
+    subgraph CRM[Retención]
+        K[Enviar campaña masiva<br/>a toda la base]
+    end
+    F --> G
+    J --> Z(((Fin)))
+    K --> Z
+    classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
+    class B,C,D,E,F,G,I,J,K sobrio
+```
+
+El proceso tiene tres problemas. El indicador que decide el presupuesto mide solo la entrada del cliente, así que premia a los canales que traen cuentas baratas aunque se vayan al mes. La proyección que usa Finanzas sobreestima: en el holdout, el ritmo de compra actual predijo 34.8% más compras de las que hubo. Y Retención trabaja sin priorizar, con el mismo mensaje para quien compra todos los días que para quien no aparece hace seis meses.
+
+## TO BE: el presupuesto se decide por retorno
 
 ```mermaid
 flowchart LR
@@ -41,7 +77,19 @@ flowchart LR
     class B,C,D,E,H,I,J,K2,L,M,N sobrio
 ```
 
-El código cubre el carril de Analítica completo y deja la lista de valiosos en riesgo en el tablero; lo que hacen Marketing y Retención con eso es cómo lo usaría el negocio, no está programado.
+El código cubre el carril de Analítica completo y deja la lista de valiosos en riesgo en el tablero. Lo que hacen Marketing y Retención con esas salidas es cómo lo usaría el negocio y no está programado.
+
+## Cómo cambian los indicadores
+
+| Indicador | AS IS | TO BE |
+|---|---|---|
+| Criterio para repartir presupuesto | CAC del mes | LTV/CAC a 24 meses y mes de payback |
+| Error de la proyección de compras a 6 meses | +34.8% (ritmo actual) | -2.2% (MBG/NBD con canal) |
+| Gasto reciente en canales que no recuperan su CAC | no se conocía | 66% de S/ 620 mil, identificado por canal |
+| LTV/CAC ponderado de lo pagado | no se medía | 0.96 |
+| Lista priorizada para retención | campaña a toda la base | 498 clientes valiosos en riesgo |
+
+Todas las cifras de la columna TO BE salen de la corrida descrita más abajo.
 
 ## De las transacciones al LTV
 

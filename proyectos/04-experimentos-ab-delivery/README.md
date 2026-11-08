@@ -1,10 +1,51 @@
 # Lectura de experimentos A/B para una app de delivery
 
-Chasqui es una app de delivery ficticia que opera en Lima, Arequipa, Trujillo y Piura. En 2026 su equipo de producto corrió cinco experimentos de cuatro semanas. Cada uno lo leía quien había propuesto el cambio, mirando un dashboard cada mañana, y las discusiones se repetían. Que ayer salió p = 0.03 y ya se puede parar. Que sube el GMV pero baja el margen. Que en Lima funciona y en provincia no. Que el tratamiento tiene 1,700 usuarios menos que el control y nadie sabe si eso importa.
+Chasqui es una app de delivery ficticia que opera en Lima, Arequipa, Trujillo y Piura. En 2026 su equipo de producto corrió cinco experimentos de cuatro semanas sobre checkout, envío gratis, recomendados, tiempos de entrega y propina sugerida.
 
-Armé este proyecto para que la lectura no dependa de quién la haga: los mismos chequeos, métricas definidas en SQL y una regla de decisión fijada antes de ver los datos, con un readout en Markdown por experimento. También hay un estudio A/A que mide cuánto se equivoca uno cuando revisa el tablero todos los días.
+## Problemática
 
-## Cómo queda el proceso
+Cada experimento lo leía quien había propuesto el cambio, mirando un dashboard cada mañana, y las discusiones se repetían. Que ayer salió p = 0.03 y ya se puede parar. Que sube el GMV pero baja el margen. Que en Lima funciona y en provincia no. Que el tratamiento tiene 1,700 usuarios menos que el control y nadie sabe si eso importa.
+
+El costo de esa forma de leer es concreto. Quien revisa el tablero todos los días y para apenas ve p < 0.05 declara ganador a un cambio sin efecto el 26.2% de las veces, cuando debería ser 5%. Un bug de registro de exposiciones puede pasar por mejora real, y un cambio que sube las ventas mientras destruye margen puede lanzarse porque nadie definió antes cuánto daño era tolerable.
+
+## Solución
+
+Armé una lectura estandarizada para que el veredicto no dependa de quién lo haga: los mismos chequeos en el mismo orden, métricas definidas en SQL, guardrails con margen de no inferioridad declarado antes de lanzar y una regla de decisión versionada en código, con un readout en Markdown por experimento. Un estudio A/A mide cuánto se equivoca uno al mirar a diario y un planificador calcula la duración necesaria antes de lanzar.
+
+El alcance incluye el generador de datos con cinco experimentos, la asignación por hash, el cálculo de métricas, CUPED, método delta, SRM, lectura secuencial con mSPRT, la regla de decisión, los readouts, la CLI y un tablero en Streamlit. Quedan fuera las capas de asignación para experimentos en paralelo y los holdouts de largo plazo para medir retención.
+
+## AS IS: cada uno lee su experimento
+
+```mermaid
+flowchart LR
+    subgraph P[Producto]
+        A((Inicio)) --> B[Proponer cambio]
+        B --> C[Lanzar al 50%<br/>sin métrica declarada]
+        R[Decidir lanzamiento<br/>según quien propuso] --> Z(((Fin)))
+    end
+    subgraph S[Sistema]
+        E[Asignar usuarios] --> F[Actualizar dashboard<br/>cada mañana]
+    end
+    subgraph PM[Quien propuso]
+        G[Revisar p-valor<br/>del día] --> H{¿p menor<br/>a 0.05?}
+        H -- No --> I[Esperar al día<br/>siguiente]
+        H -- Sí --> J[Elegir la métrica<br/>que mejor sale]
+        J --> K[Presentar resultado<br/>al equipo]
+        K --> L{¿Alguien objeta<br/>margen o segmento?}
+        L -- Sí --> M[Discutir sin<br/>criterio acordado]
+        L -- No --> R
+        M --> R
+    end
+    C --> E
+    F --> G
+    I --> G
+    classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
+    class B,C,R,E,F,G,I,J,K,M sobrio
+```
+
+Los problemas están en la secuencia. Nadie declara antes la métrica primaria ni el daño tolerable, así que la métrica se elige después de ver los datos. La parada ocurre el primer día con p < 0.05, que es la que infla los falsos positivos. No hay un chequeo de balance entre grupos antes de leer, así que un error de registro se confunde con efecto. Y cuando hay desacuerdo, se resuelve en una reunión y no con una regla.
+
+## TO BE: lectura con regla fijada antes de lanzar
 
 Producto declara qué va a medir y cuánto daño tolera antes de lanzar, y la lectura sigue un orden fijo.
 
@@ -42,6 +83,21 @@ flowchart LR
     classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
     class B,C,D,E,F,G,H,J,N,O,Q,T,R sobrio
 ```
+
+El código cubre los carriles de Sistema y Analista: asignación, métricas, SRM, mSPRT, regla de decisión y readout. La propuesta del cambio y la decisión final de Producto quedan fuera del código.
+
+## Cómo cambian los indicadores
+
+| Indicador | AS IS | TO BE |
+|---|---|---|
+| Falsos positivos en el A/A al revisar a diario | 26.2% (parando con p < 0.05) | 1.7% (mSPRT) |
+| EXP-05, con bug de registro en Android antiguo | ganador aparente, GMV +3.3% | invalidado por SRM (p = 2.9e-12) |
+| EXP-02, envío gratis desde S/ 35 | GMV +5.6%, candidato a lanzar | no lanzar, margen -7.9% contra -3% tolerado |
+| Criterio de decisión | el de quien propuso el cambio | regla en `decision.py` con un test por rama |
+
+Las cifras salen del análisis de los cinco experimentos y del estudio A/A descritos más abajo.
+
+## La regla de decisión
 
 La regla vive en [`decision.py`](src/experimentos/decision.py) y tiene un test por cada rama. Si alguien quiere cambiarla, abre un PR.
 

@@ -1,12 +1,44 @@
 # Alerta temprana de deserción universitaria
 
-La Universidad Qhapaq Ñan (ficticia) tiene tres sedes, ocho carreras y unos 8,000 alumnos por semestre entre presencial y semipresencial. De los que no egresan, el 13.0% no se vuelve a matricular el ciclo siguiente. En primer ciclo es el 24.1%.
+La Universidad Qhapaq Ñan (ficticia) tiene tres sedes, ocho carreras y unos 8,000 alumnos por semestre entre presencial y semipresencial. Bienestar Estudiantil tiene seis tutores y le alcanza para unas 100 llamadas por semana a alumnos que podrían dejar la universidad.
 
-Bienestar Estudiantil tiene seis tutores y le alcanza para unas 100 llamadas por semana. Hoy trabajan con una regla de tres alertas: asistencia acumulada menor a 70%, alguna evaluación desaprobada o dos cuotas vencidas. La regla tiene sentido, el problema es el volumen. Desde la semana 4 marca a uno de cada cuatro alumnos (1,949 en la semana 4 de 2026-1, 2,510 en la semana 8) y el reporte llega sin orden, así que a quién se llama termina dependiendo de en qué fila cayó cada uno.
+## Problemática
 
-Lo que quería saber es simple: con las mismas 100 llamadas, ¿a cuántos de los que se van se les llega antes de que dejen de ir?
+De los que no egresan, el 13.0% no se vuelve a matricular el ciclo siguiente; en primer ciclo es el 24.1%. Para decidir a quién llamar, Bienestar usa una regla de tres alertas: asistencia acumulada menor a 70%, alguna evaluación desaprobada o dos cuotas vencidas. La regla tiene sentido, el problema es el volumen. Desde la semana 4 marca a uno de cada cuatro alumnos (1,949 en la semana 4 de 2026-1, 2,510 en la semana 8) y el reporte llega sin orden.
 
-## El proceso con la lista
+Con 100 llamadas por semana y casi dos mil marcados, a quién se llama termina dependiendo de en qué fila cayó cada uno. Simulando el semestre 2026-1 con esa regla, solo el 31.2% de los desertores recibe una llamada antes de dejar de ir, y tres de cada cuatro llamadas van a alumnos que no se iban a ir.
+
+## Solución
+
+Armé un modelo que cada domingo calcula el riesgo de cada alumno activo con lo registrado hasta esa semana (asistencia, aula virtual, notas y cuotas) y entrega a Bienestar una lista ordenada con las razones en texto para el tutor. Aparte va la lista de los que no asistieron en toda la semana, que se llaman primero sin pasar por el modelo. La decisión que habilita es a quién llamar esta semana con la capacidad que hay, y la evaluación responde cuántos desertores se alcanzan a tiempo con las mismas 100 llamadas.
+
+El alcance incluye el generador de datos, el panel alumno-semana sin fuga del futuro, el LightGBM calibrado con una logística y la regla actual como referencias, las razones con SHAP, el análisis de supervivencia, la simulación de la lista, la CLI y un tablero en Streamlit. Quedan fuera la tutoría en sí, un experimento que mida si la llamada retiene y las reincorporaciones.
+
+## AS IS: un reporte de alertas sin orden
+
+```mermaid
+flowchart LR
+    subgraph SIS[Sistema académico]
+        A((Inicio<br/>fin de semana)) --> B[Exportar asistencia,<br/>notas y cuotas]
+    end
+    subgraph BIE[Bienestar Estudiantil]
+        C[Marcar alumnos con<br/>alguna de las tres alertas] --> D[Repartir el reporte<br/>entre los tutores]
+    end
+    subgraph TUT[Tutor]
+        E[Llamar en el orden<br/>del reporte] --> F{¿Quedan llamadas<br/>esta semana?}
+        F -- Sí --> E
+        F -- No --> G[Dejar al resto para<br/>la semana siguiente]
+    end
+    B --> C
+    D --> E
+    G --> Z(((Fin)))
+    classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
+    class B,C,D,E,G sobrio
+```
+
+El cuello de botella es la capacidad de llamadas, y el proceso no la toma en cuenta: la regla marca muchos más alumnos de los que se pueden atender y no dice por quién empezar. Tampoco dice por qué se marca a alguien, así que el tutor llama sin saber si el tema es plata, notas o asistencia. Y quien dejó de ir por completo queda mezclado con el resto, cuando es al que más urge llamar.
+
+## TO BE: una lista priorizada con razones
 
 ```mermaid
 flowchart LR
@@ -40,7 +72,20 @@ flowchart LR
     class B,C,D,F,G,H,I,K,M,N,O sobrio
 ```
 
-La parte de Bienestar y del tutor no está en el código; es cómo usaría la lista una oficina real. El código cubre hasta la lista ordenada con razones y la lista de ausentes.
+El código cubre hasta la lista ordenada con razones y la lista de ausentes. La parte de Bienestar y del tutor no está en el código; es cómo usaría la lista una oficina real.
+
+## Cómo cambian los indicadores
+
+Medidos en 2026-1, un semestre que el modelo no vio, con 100 llamadas por semana.
+
+| Indicador | AS IS (regla sin orden) | TO BE (LightGBM) |
+|---|---|---|
+| Desertores alcanzados antes de dejar de ir | 31.2% | 57.6% |
+| Llamadas que van a un futuro desertor | 26.2% | 47.1% |
+| Desertores por choque económico alcanzados | no se medía | 72.3% |
+| Razón del riesgo para el tutor | ninguna | dos razones en texto por alumno |
+
+Solo con ordenar la lista de la regla se llega al 54.0%. La mayor parte de la mejora viene de ordenar y el modelo suma 3.6 puntos encima; el detalle está en los resultados.
 
 ## Por dentro
 

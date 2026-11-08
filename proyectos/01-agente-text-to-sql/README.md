@@ -1,12 +1,45 @@
 # Agente text-to-SQL con guardrails
 
-Un gerente pregunta en español, el agente arma el SQL, lo valida, lo corre y devuelve la cifra junto con la consulta que la respalda.
+Minimarkets La Esquina es una cadena ficticia de 24 tiendas en Lima y provincias. Sus gerentes y jefes de tienda le hacen al equipo de datos preguntas sueltas sobre ventas, medios de pago y tiendas, y este agente las responde en español con la cifra y la consulta que la respalda.
 
-## De dónde sale
+## Problemática
 
-En cualquier equipo de datos llegan a diario preguntas como "¿cuánto vendimos con Yape en Miraflores en julio?". Cada una toma cinco minutos, pero son veinte a la semana. Un LLM escribe SQL razonable; lo difícil es que respete las definiciones del negocio (Callao cuenta como Lima), que no pueda tocar nada fuera de lo permitido y que se pueda medir si un cambio en el prompt lo empeora.
+Preguntas como "¿cuánto vendimos con Yape en Miraflores en julio?" llegan a diario. Cada una toma unos cinco minutos, pero son veinte a la semana, y todas pasan por un analista que deja lo que estaba haciendo para escribir el SQL. La cola la arma quien pregunta más fuerte.
 
-Así queda el proceso con el agente en medio:
+Además, la cifra llega sola, en un correo o un chat, sin la consulta que la produjo. Si dos analistas aplican distinto una definición (si Callao cuenta como Lima, qué es una tienda comparable), salen dos números para la misma pregunta y nadie puede revisar cuál está bien. Poner un LLM a escribir SQL resuelve la velocidad pero abre otro riesgo: que corra algo que no debe o que un cambio en el prompt lo empeore sin que nadie lo note.
+
+## Solución
+
+Construí un agente con tool calling que revisa el esquema, escribe el SQL según un glosario de negocio único, lo pasa por un guard que solo deja leer, lo ejecuta en DuckDB y responde con texto, tabla y SQL. El analista deja de escribir consultas repetidas y pasa a mantener el glosario y el set de evaluación.
+
+Los entregables son el agente con su CLI y modo demo sin API key, el guard con sqlglot, el tablero en Streamlit, una base de prueba generada con semilla fija y un set de 15 preguntas con SQL de referencia para medir cada cambio. Quedan fuera la memoria de conversación, la repregunta ante ambigüedad y la conexión a una base productiva.
+
+## AS IS: cada pregunta pasa por un analista
+
+```mermaid
+flowchart LR
+    subgraph G["Gerente o jefe de tienda"]
+        I((Inicio)) --> P[Enviar la pregunta<br/>por correo o chat]
+        R[Recibir la cifra<br/>sin la consulta] --> D{¿Cuadra con<br/>otro reporte?}
+        D -- Sí --> F(((Fin)))
+        D -- No --> P
+    end
+    subgraph A["Analista de datos"]
+        C[Encolar la pregunta] --> E[Buscar tablas y<br/>recordar definiciones]
+        E --> S[Escribir y correr SQL<br/>con su usuario]
+        S --> Q{¿Corrió bien?}
+        Q -- No --> E
+        Q -- Sí --> T[Copiar la cifra<br/>a la respuesta]
+    end
+    P --> C
+    T --> R
+    classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
+    class P,R,C,E,S,T sobrio
+```
+
+El cuello de botella es el analista: todo pasa por una sola persona y se atiende en orden de llegada. Las definiciones viven en la cabeza de cada uno, así que el reproceso aparece cuando dos cifras no cuadran y la pregunta vuelve a la cola. Y como la respuesta no trae el SQL, nadie fuera del equipo puede auditarla.
+
+## TO BE: el agente responde y el analista mantiene las reglas
 
 ```mermaid
 flowchart LR
@@ -26,6 +59,9 @@ flowchart LR
         X --> C{¿Corrió sin error?}
         Z[Reejecutar el SQL final para la tabla completa]
     end
+    subgraph AN["Analista de datos"]
+        M[Actualizar glosario<br/>y casos de evaluación] --> EV[Correr la evaluación<br/>antes de cada cambio]
+    end
     P --> E
     S --> V
     V -- No --> K
@@ -34,9 +70,22 @@ flowchart LR
     OK --> Z
     N --> R
     Z --> R
+    N -.-> M
     classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
-    class P,R,E,S,K,N,OK,X,Z sobrio
+    class P,R,E,S,K,N,OK,X,Z,M,EV sobrio
 ```
+
+Los carriles del gerente, el agente y el guard están en el código. El del analista también existe como herramienta (`evals/evaluar.py` y el glosario en `prompts.py`), pero la rutina de revisar las preguntas que el agente no resolvió es cómo lo usaría el equipo y no está automatizada.
+
+## Cómo cambian los indicadores
+
+| Indicador | AS IS | TO BE |
+|---|---|---|
+| Quién escribe el SQL de una pregunta repetida | el analista, a mano | el agente, en hasta 10 pasos |
+| Trazabilidad de la cifra | cifra sin consulta | cada respuesta trae su SQL |
+| Definiciones de negocio | cada analista las aplica a su manera | un glosario único en `prompts.py` |
+| Control de lo que se ejecuta | credenciales del analista | un solo SELECT, LIMIT 200, corte a los 15 s y conexión de solo lectura |
+| Calidad medida antes de un cambio | no se medía | 15 preguntas con SQL de referencia comparadas por resultado |
 
 ## Por dentro
 

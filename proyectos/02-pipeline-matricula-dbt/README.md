@@ -1,12 +1,46 @@
 # Pipeline de matrícula con dbt + DuckDB
 
-Limpia los exports crudos de un sistema académico y los modela en capas con dbt para medir matrícula, ocupación de secciones y retención. Cada build corre 47 tests de datos y 4 tests unitarios. El resultado se ve en un tablero de Streamlit o en la CLI.
+La Universidad Mirasol es una universidad privada ficticia con sedes en Lima Norte, Lima Centro y Arequipa y ocho carreras. Durante las tres semanas de matrícula, Registros Académicos, Bienestar y Finanzas trabajan con los exports del sistema académico, y este pipeline los limpia y modela una sola vez para todos.
 
-## Las tres semanas de matrícula
+## Problemática
 
-Durante la matrícula, Registros Académicos quiere saber cada mañana cuántos alumnos van contra el año pasado y qué secciones conviene cerrar. Bienestar pregunta quién no volvió y Finanzas cruza todo con la morosidad.
+Cada mañana de matrícula Registros Académicos quiere saber cuántos alumnos van contra el año pasado y qué secciones conviene cerrar. Bienestar pregunta quién no volvió y Finanzas cruza todo con la morosidad. Los tres parten de los mismos CSV, que vienen con dobles clics, fechas en dos formatos según el canal, códigos con espacios, secciones de prueba, retiros sin inscripción, montos como texto (`"S/ 1,250.00"`) y notas `NSP`.
 
-Los CSV vienen con dobles clics, fechas en dos formatos según el canal, códigos con espacios, secciones de prueba, retiros sin inscripción, montos como texto (`"S/ 1,250.00"`) y notas `NSP`. Si cada analista limpia a su manera, dos reportes del mismo día no cuadran. Por eso puse las reglas en un solo lugar, con tests, y el ciclo diario queda así:
+Cada analista limpia a su manera, así que dos reportes del mismo día no cuadran y la reunión se va en discutir qué número es el bueno. Las decisiones que no admiten espera, como cerrar una sección con pocos inscritos, se toman con el reporte que llegó primero. Y el total esconde cosas: la matrícula puede crecer mientras los ingresantes caen.
+
+## Solución
+
+Puse las reglas de limpieza y las definiciones (inscripción vigente, retención, ocupación, deuda al cierre) en un proyecto dbt sobre DuckDB, en capas staging, intermedio y marts, con tests de datos en cada build y una cuarentena para lo que no se puede corregir. Los tres equipos leen las mismas tablas.
+
+Los entregables son el generador de exports con los problemas reales del sistema, el proyecto dbt con 47 tests de datos y 4 unitarios, el registro de cada corrida en un schema de auditoría, una CLI y un tablero en Streamlit con avance, ocupación, retención y calidad. Quedan fuera la lectura incremental de archivos nuevos, el historial SCD2 del maestro de alumnos y la orquestación.
+
+## AS IS: cada analista limpia su propia copia
+
+```mermaid
+flowchart LR
+    subgraph SA["Sistema académico"]
+        A0((Inicio)) --> A1[Exportar CSV]
+    end
+    subgraph AN["Analistas de cada área"]
+        B1[Descargar los CSV] --> B2[Limpiar en Excel<br/>con sus propias reglas]
+        B2 --> B3[Armar el reporte<br/>del día]
+    end
+    subgraph RA["Registros Académicos"]
+        C1[Comparar reportes<br/>de las áreas] --> G1{¿Cuadran?}
+        G1 -- No --> C2[Pedir que<br/>expliquen la diferencia]
+        G1 -- Sí --> C3[Decidir cierres con<br/>el total del día]
+        C3 --> F(((Fin)))
+    end
+    A1 --> B1
+    B3 --> C1
+    C2 --> B2
+    classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
+    class A1,B1,B2,B3,C1,C2,C3 sobrio
+```
+
+El problema está en la limpieza repetida: la misma tarea la hacen varias personas con reglas distintas y sin pruebas, y el reproceso aparece cuando los reportes se comparan. Nadie aparta los registros dudosos, como un retiro sin inscripción previa, así que se mezclan con los buenos. La decisión de cierre se toma con un total que no separa ingresantes de continuadores.
+
+## TO BE: una sola limpieza con tests y cuarentena
 
 ```mermaid
 flowchart LR
@@ -32,7 +66,21 @@ flowchart LR
     A1 --> B1
     G1 -- No --> C1 --> B1
     B4 --> D1
+    classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
+    class A1,B1,B2,B3,B4,C1,D1,D2,D3 sobrio
 ```
+
+El carril del pipeline está en el código, y el tablero ya cuenta las secciones presenciales bajo 40% de ocupación. Evaluar y ejecutar el cierre le toca a Registros Académicos y no está programado.
+
+## Cómo cambian los indicadores
+
+| Indicador | AS IS | TO BE |
+|---|---|---|
+| Reglas de limpieza | una por analista, sin pruebas | un proyecto dbt con 47 tests de datos y 4 unitarios en cada build |
+| Fechas en formato `dd/mm/yyyy` | se corregían o no según quién | 18,531 corregidas |
+| Dobles clics | contados como inscripciones | 3,497 descartados |
+| Retiros sin inscripción previa | mezclados con el resto | 60 en cuarentena |
+| Ingresantes frente al total | escondidos en el total | 2026-2: matrícula +12.3%, ingresantes -7.9% |
 
 ## Capas
 

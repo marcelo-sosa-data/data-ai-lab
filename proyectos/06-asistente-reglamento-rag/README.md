@@ -1,16 +1,51 @@
 # Asistente del reglamento académico con RAG
 
-Responde las preguntas de los estudiantes sobre las normas de la universidad con el artículo vigente a la fecha de la consulta. Si no puede citar, no responde.
+La Universidad Qhapaq Ñan (ficticia) tiene sus normas en seis documentos: cuatro reglamentos, un régimen disciplinario y una resolución de 2026 que cambió cinco artículos del reglamento de estudios e incorporó uno nuevo. Registros Académicos atiende las consultas de los estudiantes sobre esas normas.
 
-## De dónde sale
+## Problemática
 
-La Universidad Qhapaq Ñan (ficticia) recibe en Registros Académicos las mismas preguntas cada semestre: hasta cuándo me puedo retirar de un curso, qué pasa si jalo por cuarta vez, cuánto es la mora. Todo está en seis documentos, cuatro reglamentos, un régimen disciplinario y una resolución de 2026 que cambió cinco artículos del reglamento de estudios.
+Cada semestre llegan las mismas preguntas: hasta cuándo me puedo retirar de un curso, qué pasa si jalo por cuarta vez, cuánto es la mora. Las responde el personal de Registros a mano, buscando en los PDF, y en las semanas de matrícula y retiro la cola crece justo cuando el plazo importa.
 
-Un chatbot que "lea los PDF" se arma en una tarde. Lo difícil es otra cosa. Los alumnos dicen "jalar", "congelar" o "trica" y el reglamento dice desaprobar, reserva de matrícula y tercera matrícula. El texto viejo sigue ahí: la resolución 014-2026-CU bajó el plazo de retiro de la semana 10 a la 8, pero el reglamento original todavía dice semana 10. Y hay preguntas que el corpus no responde aunque usen sus palabras, como "¿hay cursos de natación en verano?", donde lo correcto es decir que no está.
+Buscar en los PDF tampoco es sencillo. Los alumnos dicen "jalar", "congelar" o "trica" y el reglamento dice desaprobar, reserva de matrícula y tercera matrícula. El texto viejo sigue publicado: la resolución 014-2026-CU bajó el plazo de retiro de la semana 10 a la 8, pero el reglamento original todavía dice semana 10, y quien consulta el documento equivocado da una respuesta vencida con la cita en la mano. Un chatbot que "lea los PDF" agrava esto, porque además inventa cuando el reglamento no dice nada.
 
-## Cómo queda la atención de una consulta
+## Solución
 
-El estudiante pregunta y el asistente responde con la cita, o le dice que escriba a Registros Académicos. Cuando sale una resolución, el artículo modificado entra con su fecha de vigencia y la versión anterior deja de ser elegible desde ese día.
+Armé un asistente que responde con el artículo vigente a la fecha de la consulta y lo cita con norma, número y versión. Si no encuentra algo parecido o el texto no alcanza, no responde y deriva a Registros Académicos. Cuando sale una resolución, el artículo modificado entra con su fecha de vigencia y la versión anterior deja de ser elegible desde ese día.
+
+El alcance incluye el corpus por artículo con su vigencia, la búsqueda BM25, vectorial e híbrida, el diccionario de jerga, el umbral de abstención, la redacción con un LLM (o modo extractivo sin API key), la evaluación con 145 preguntas, la CLI y un tablero en Streamlit. Quedan fuera la calidad de las respuestas redactadas por un LLM, que no medí, la extracción de PDF reales y la integración con los canales de atención.
+
+## AS IS: Registros responde cada consulta a mano
+
+```mermaid
+flowchart LR
+    subgraph EST[Estudiante]
+        ini((Inicio)) --> preg[Escribir o acercarse<br/>con la consulta]
+        leer[Recibir la respuesta] --> fin(((Fin)))
+    end
+    subgraph REG[Registros Académicos]
+        cola[Atender por orden<br/>de llegada] --> traducir[Traducir la jerga<br/>al término del reglamento]
+        traducir --> buscar[Buscar el artículo<br/>en los PDF]
+        buscar --> vigente{¿Hay una resolución<br/>que lo modificó?}
+        vigente -- No sabe --> responder[Responder con<br/>el texto encontrado]
+        vigente -- Sí --> revisar[Revisar la resolución<br/>y su fecha]
+        revisar --> responder
+        buscar --> existe{¿El reglamento<br/>lo dice?}
+        existe -- No --> consultar[Consultar a<br/>Secretaría General]
+    end
+    subgraph SEC[Secretaría General]
+        ini2((Nueva resolución)) --> publicar[Publicar la resolución<br/>aparte del reglamento]
+        consultar --> resp2[Responder a Registros]
+    end
+    preg --> cola
+    responder --> leer
+    resp2 --> responder
+    classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
+    class preg,leer,cola,traducir,buscar,responder,revisar,consultar,publicar,resp2 sobrio
+```
+
+El cuello de botella es la atención uno a uno de preguntas que se repiten, y se agrava en las semanas con plazos. El reproceso está en la búsqueda: cada vez hay que traducir la jerga y ubicar el artículo. Y el riesgo mayor es la vigencia, porque la resolución se publica aparte y nada obliga a revisarla antes de responder.
+
+## TO BE: el asistente responde con la norma vigente y deriva lo que no sabe
 
 ```mermaid
 flowchart LR
@@ -44,7 +79,19 @@ flowchart LR
     class preg,leer,cargar,vig,filtro,buscar,redactar,entregar,derivar,atender sobrio
 ```
 
-La primera abstención evita gastar una llamada al modelo cuando la búsqueda no encontró nada parecido.
+Todo el carril del Asistente está en el código, incluida la carga de una resolución con su fecha. La atención de lo derivado en Registros y la publicación del asistente en un canal real no lo están. La primera abstención evita gastar una llamada al modelo cuando la búsqueda no encontró nada parecido.
+
+## Cómo cambian los indicadores
+
+| Indicador | AS IS | TO BE |
+|---|---|---|
+| Atención de preguntas frecuentes | una por una, por personal de Registros | automática, Registros recibe solo lo derivado |
+| Respuestas con texto derogado en artículos modificados | dependía de revisar la resolución (6 de 10 sin filtro de fecha) | 0 de 10 con el filtro de vigencia |
+| Acierto@1 en preguntas coloquiales | 54.3% buscando por palabras (BM25) | 85.7% con búsqueda vectorial |
+| Preguntas sin respuesta en el reglamento | se consultaban a Secretaría | 5 de 8 frenadas por el umbral; el resto lo decide el LLM |
+| Respuestas con el artículo correcto citado | sin registro | 57 de 64 en modo extractivo |
+
+Las cifras salen de la evaluación con las 72 preguntas de prueba que se describe más abajo. La fila de BM25 es una referencia de búsqueda por palabras, no una medición del personal.
 
 ## Por dentro
 

@@ -1,18 +1,51 @@
 # Pronóstico de demanda y reposición para boticas
 
-Pronóstico diario por local y producto con un LightGBM global, intervalos conformal y una simulación que traduce el error del modelo a quiebres, inventario y venta perdida.
+Boticas Alameda es una cadena ficticia de 24 locales en Lima, el norte y el sur, con 48 productos entre respiratorio, analgésicos y crónicos. Abastecimiento arma cada lunes el pedido de cada local, que llega en 2 días a Lima y en 4 a provincia.
 
-## Por qué la regla de siempre se queda corta
+## Problemática
 
-Boticas Alameda es una cadena ficticia de 24 locales en Lima, el norte y el sur. Repone cada lunes pidiendo hasta cubrir 12 días (15 en provincia) del promedio de venta de las últimas cuatro semanas. Falla cuando la demanda cambia rápido, como al inicio del invierno, en un brote de dengue en el norte o tras un desabastecimiento del proveedor.
+El pedido se calcula con una regla fija: cubrir 12 días (15 en provincia) del promedio de venta de las últimas cuatro semanas. Funciona mientras la demanda no se mueve, y falla justo cuando más importa: al inicio del invierno, en un brote de dengue en el norte o después de un desabastecimiento del proveedor.
 
-Hay un problema más escondido. El promedio se calcula sobre la venta, y en un día de quiebre la venta no es la demanda. Si el jarabe se acabó el martes, el promedio de esa semana baja y el pedido del lunes siguiente también. El quiebre se alimenta solo.
+Hay un problema más escondido. El promedio se calcula sobre la venta, y en un día de quiebre la venta no es la demanda. Si el jarabe se acabó el martes, el promedio de esa semana baja y el pedido del lunes siguiente también, así que el quiebre se alimenta solo. Con esa regla la cadena perdió S/ 293,212 en venta entre abril y setiembre de 2026 y mantuvo S/ 360,676 de inventario promedio al costo, sin saber qué parte de ese stock servía de colchón y qué parte sobraba.
 
-Más que saber cuánto mejora el pronóstico, quería responder con cuánto inventario se logra qué nivel de servicio.
+## Solución
 
-## Cómo queda el pedido semanal
+Construí un pronóstico diario por local y producto con un LightGBM global que trata los días de quiebre como dato faltante, intervalos conformal para la ventana de cada pedido y una simulación que traduce el error del modelo a quiebres, inventario y venta perdida. Con eso la pregunta deja de ser cuánto mejora el pronóstico y pasa a ser con cuánto inventario se logra qué nivel de servicio.
 
-El ciclo de cada lunes con la herramienta. El sistema propone y el analista revisa antes de soltar el pedido.
+El alcance incluye el generador de datos, el backtest de 13 cortes, la calibración de intervalos, la simulación de cuatro políticas de pedido, el pedido sugerido por local, la CLI y un tablero en Streamlit. Quedan fuera la sustitución entre productos, las transferencias entre locales y las variables externas como casos de dengue o temperatura.
+
+## AS IS: el pedido sale del promedio de cuatro semanas
+
+```mermaid
+flowchart LR
+    subgraph SIS[Sistema]
+        ini((Lunes)) --> carga[Exportar venta de<br/>las últimas 4 semanas]
+    end
+    subgraph AN[Analista de demanda]
+        prom[Calcular promedio<br/>diario por producto] --> cob[Multiplicar por 12 días<br/>o 15 en provincia]
+        cob --> neto[Restar stock<br/>del local]
+        neto --> alerta{¿Algún local<br/>reclamó quiebres?}
+        alerta -- Sí --> manual[Subir cantidades<br/>a criterio]
+        alerta -- No --> aprobar
+        manual --> aprobar[Aprobar pedido]
+    end
+    subgraph ABA[Abastecimiento]
+        despachar[Despachar a locales]
+    end
+    subgraph LOC[Local]
+        recibir[Recibir mercadería] --> vender[Vender hasta<br/>agotar stock]
+        vender --> fin(((Fin)))
+    end
+    carga --> prom
+    aprobar --> despachar
+    despachar --> recibir
+    classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
+    class carga,prom,cob,neto,manual,aprobar,despachar,recibir,vender sobrio
+```
+
+El proceso tiene tres fallas. La regla mira hacia atrás, así que reacciona tarde a la estacionalidad y a los brotes. Usa la venta como si fuera demanda, y en los días de quiebre subestima 49.5% lo que de verdad se iba a vender. Y el colchón de seguridad es implícito: nadie sabe si 12 días de cobertura para una ventana de 8 es mucho o poco, así que el ajuste termina dependiendo de qué local reclamó esa semana.
+
+## TO BE: el pedido sale del pronóstico con un margen explícito
 
 ```mermaid
 flowchart LR
@@ -40,9 +73,26 @@ flowchart LR
         recibir --> vender[Vender y registrar<br/>stock de cierre]
         vender --> fin(((Fin)))
     end
+    classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
+    class carga,entrenar,pron,p95,neto,revisar,ajustar,aprobar,despachar,recibir,vender sobrio
 ```
 
-Por dentro, el código.
+El código cubre el carril del Sistema y deja el pedido sugerido por local en la CLI y el tablero. La revisión del analista, el despacho y la recepción son cómo lo usaría la cadena y no están programados.
+
+## Cómo cambian los indicadores
+
+| Indicador | AS IS | TO BE |
+|---|---|---|
+| Error del pronóstico semanal (WAPE) | 22.6% (promedio 28 días) | 19.0% (LightGBM) |
+| Subestimación en días de quiebre | 49.5% | 32.9% |
+| Nivel de servicio | 98.0% | 98.4% (margen P95) |
+| Venta perdida, 28 abr a 28 set 2026 | S/ 293,212 | S/ 204,886 |
+| Inventario promedio al costo | S/ 360,676 | S/ 303,494 |
+
+Las cifras salen del backtest y de la simulación de reposición descritos más abajo.
+
+## Cómo funciona por dentro
+
 
 ```mermaid
 flowchart LR

@@ -1,16 +1,50 @@
 # Lakehouse de envíos con Iceberg y CDC
 
-Los cambios de la tabla de envíos de un courier llegan cada 6 horas como eventos de CDC. Los cargo a Apache Iceberg en tres capas, los valido contra un contrato versionado y cada mañana publico el cumplimiento de promesa con una etiqueta, para poder decir después qué número se vio ese día.
+Kallpa Envíos (empresa ficticia) hace última milla para unas 320 tiendas online en Lima, Callao y siete ciudades de provincia. Cada cambio de estado de un envío es un `UPDATE` en la base transaccional, y a Datos le llega por CDC en formato Debezium, en archivos que el conector deja cada 6 horas. Con eso Operaciones revisa cada mañana el cumplimiento de promesa (OTD) por zona y servicio.
 
-## De dónde sale
+## Problemática
 
-Kallpa Envíos (empresa ficticia) hace última milla para unas 320 tiendas online en Lima, Callao y siete ciudades de provincia. Cada cambio de estado de un envío es un `UPDATE` en la base transaccional, y a Datos le llega por CDC en formato Debezium, en archivos que el conector deja cada 6 horas.
+El `MERGE` que cargaba esos archivos aplicaba los eventos en el orden en que llegaban. El conector entrega al menos una vez, así que los duplicados inflaban el historial, y algunos eventos llegan lotes después: si gana lo último que llegó, un envío entregado vuelve a figurar `en_ruta`. En los cuatro meses simulados eso deja 1,096 envíos con el estado equivocado, 1,064 de ellos entregados que figuran como no entregados, casi nueve décimas de punto de OTD que no existían.
 
-El `MERGE` que había fallaba por varios lados. El conector entrega al menos una vez y los duplicados inflaban el historial. Algunos eventos llegan lotes después, y si gana lo último que llegó, un envío entregado vuelve a figurar `en_ruta`. Origen cambiaba sin avisar y nos enterábamos por el tablero. Y como los motorizados sin señal sincronizan la entrega horas después, nadie podía decir qué OTD se vio el lunes a las 8.
+A eso se sumaban los cambios en origen que nadie avisaba, como pesos en gramos o estados en mayúsculas, y de los que Datos se enteraba por el tablero. Y como los motorizados sin señal sincronizan la entrega horas después, el OTD se movía de un día para otro y nadie podía decir qué número se había visto el lunes a las 8.
 
-## Cómo queda el proceso
+## Solución
 
-Así fluye un lote desde origen hasta la reunión de Operaciones. La cuarentena no frena el lote; si pasa del umbral, Datos revisa y le lleva la evidencia a Plataforma.
+Armé un lakehouse en Apache Iceberg con tres capas. Bronce guarda cada lote tal como llegó; plata aplica los cambios ordenados por `lsn` (la posición en el log de la base) y manda a cuarentena lo que rompe un contrato de datos versionado; oro publica el OTD en el corte de las 06:00 y etiqueta ese snapshot para poder volver a él. Con eso Operaciones discute un número estable y Datos le lleva a Plataforma la evidencia de cada problema de origen antes de que llegue al tablero.
+
+El alcance incluye el simulador de la base de origen y del conector, el contrato en YAML, la ingesta incremental con marca de agua, el mantenimiento semanal de las tablas, la conciliación contra origen, los assets de Dagster con chequeos y sensor, la CLI y un tablero en Streamlit. Quedan fuera Kafka y Debezium reales, varios escritores simultáneos y la decisión de normalizar datos que le toca a Plataforma.
+
+## AS IS: cada lote se aplica como llega
+
+```mermaid
+flowchart LR
+    subgraph PLA[Plataforma]
+        ini((Inicio)) --> upd[Actualizar estado<br/>del envío en origen]
+        cam[Cambiar esquema o<br/>formato sin avisar]
+    end
+    subgraph CON[Conector CDC]
+        upd --> lote[Escribir lote<br/>cada 6 h]
+        cam --> lote
+    end
+    subgraph DAT[Datos]
+        lote --> mer[Aplicar MERGE en<br/>orden de llegada]
+        mer --> tab[Recalcular OTD<br/>sobre la tabla actual]
+        rec[Revisar el lote<br/>a mano] --> rep[Reprocesar la carga]
+    end
+    subgraph OPE[Operaciones]
+        tab --> reu[Revisar OTD en la<br/>reunión de la mañana]
+        reu --> dud{¿El número cuadra<br/>con el de ayer?}
+        dud -- No --> rec
+        dud -- Sí --> fin(((Fin)))
+    end
+    rep --> tab
+    classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
+    class upd,cam,lote,mer,tab,rec,rep,reu sobrio
+```
+
+Los problemas están en tres puntos. El `MERGE` no conoce el orden real de los cambios, así que los eventos tardíos y duplicados ensucian el estado actual sin que nadie lo note. No hay un control de calidad a la entrada: el error de origen se descubre en la reunión de Operaciones y termina en una revisión manual y un reproceso. Y el OTD se recalcula sobre la tabla viva, de modo que el número de ayer no se puede reconstruir y cada diferencia se vuelve una discusión.
+
+## TO BE: cada lote se valida, se ordena y se etiqueta
 
 ```mermaid
 flowchart LR
@@ -46,11 +80,23 @@ flowchart LR
     end
     avi --> cor
     cor --> lote
-    classDef sobrio fill:#f4f4f2,stroke:#555,color:#222
+    classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
     class upd,cor,lote,bro,cua,act,his,ign,pub,rev,avi,reu sobrio
 ```
 
-La corrección de Plataforma vuelve a entrar como un evento más, con `lsn` mayor, y plata la toma sin reprocesar nada.
+El carril del pipeline está completo en el código, incluida la alerta cuando la cuarentena pasa de 2% del lote. La revisión de Datos, el aviso a Plataforma y la reunión de Operaciones son cómo lo usaría el negocio. La corrección de Plataforma vuelve a entrar como un evento más, con `lsn` mayor, y plata la toma sin reprocesar nada.
+
+## Cómo cambian los indicadores
+
+| Indicador | AS IS | TO BE |
+|---|---|---|
+| Envíos con estado equivocado al cierre | 1,096 (MERGE en orden de llegada) | 0 (guarda de `lsn`) |
+| Duplicados del conector en plata | entraban al historial | 2,363 descartados |
+| Errores de origen detectados | en el tablero, a mano | en el lote: peso en gramos desde el lote de las 12:00 del 18 de agosto |
+| OTD de un día pasado | no se podía reconstruir | 123 cortes etiquetados en oro |
+| Envíos de origen que no cuadran con plata | no se conciliaba | 43, todos en cuarentena por distrito mal escrito |
+
+Las cifras salen de correr los 492 lotes con `python -m lakehouse correr`, como se detalla más abajo.
 
 ## Las tablas
 

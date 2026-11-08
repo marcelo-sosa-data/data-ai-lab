@@ -1,16 +1,56 @@
 # Capa semántica y monitor de KPIs para una pasarela de pagos
 
-Cada métrica se define una vez en YAML y se compila a SQL para DuckDB, Snowflake, BigQuery o Postgres. Encima de esa capa corre un monitor diario que avisa cuando un KPI se sale de lo esperado y dice en qué segmento está el cambio.
+Tinkuy Pay es una empresa ficticia que procesa cobros de bodegas, restaurantes, farmacias, tiendas de ropa y servicios en Lima, Arequipa, Trujillo, Piura y Cusco, con QR interoperable, débito, crédito y link de pago, desde la app del comercio o un POS. Entre julio de 2025 y setiembre de 2026 pasaron por su plataforma 2.3 millones de intentos de cobro.
 
-## Por qué lo armé
+## Problemática
 
-Tinkuy Pay es una empresa ficticia que procesa cobros de bodegas, restaurantes, farmacias, tiendas de ropa y servicios en Lima, Arequipa, Trujillo, Piura y Cusco, con QR interoperable, débito, crédito y link de pago, desde la app del comercio o un POS.
+Cada área calculaba los KPIs a su manera. Finanzas sacaba la tasa de aprobación como promedio de las tasas diarias y Operaciones como aprobadas sobre intentos, así que en meses con días de mucho y poco volumen las cifras no coincidían y las reuniones empezaban discutiendo qué número era el correcto. "Comercios activos" se sumaba por semana para armar el mes, y un comercio que cobra todos los días contaba 30 veces.
 
-Finanzas calculaba la tasa de aprobación como promedio de las tasas diarias y Operaciones como aprobadas sobre intentos, así que en meses con días de mucho y poco volumen las cifras no coincidían. "Comercios activos" se sumaba por semana para armar el mes, y un comercio que cobra todos los días contaba 30 veces.
+Cuando un KPI se movía, nadie se enteraba hasta que alguien miraba el tablero. Y para saber por qué, un analista abría Excel y probaba dimensión por dimensión hasta encontrar al culpable. Tampoco había forma de separar un problema real de un cambio de mezcla: si el ticket promedio bajaba, no se sabía si los comercios vendían menos o si habían entrado muchos comercios de ticket bajo.
 
-Y cuando la tasa de aprobación caía, alguien abría Excel y probaba dimensión por dimensión hasta encontrar al culpable. Quería que la definición viva en un archivo versionado y que el tablero, la CLI y el monitor lean de ahí.
+## Solución
 
-## Cómo queda el proceso cuando salta una alerta
+Armé una capa semántica donde cada métrica se define una vez en YAML, con responsable, formato y umbral de negocio, y se compila a SQL para DuckDB, Snowflake, BigQuery o Postgres. Encima corre un monitor diario que compara cada KPI contra lo esperado para ese día y, cuando salta, descompone el cambio en efecto mezcla y efecto tasa por dimensión para decir en qué segmento está.
+
+El alcance incluye el YAML con ocho métricas, el compilador con sqlglot, la validación contra la base, el monitor, la explicación, una CLI y un tablero en Streamlit, probado contra cuatro incidentes simulados. Quedan fuera los joins entre tablas de hechos (cobros con contracargos), el envío automático de alertas a un canal y la calibración con postmortems reales.
+
+## AS IS: cada área con su número y la causa se busca a mano
+
+```mermaid
+flowchart LR
+    subgraph FI[Finanzas]
+        A((Inicio<br/>cierre de mes)) --> B[Promediar tasas<br/>diarias en Excel]
+        B --> C[Reportar KPIs<br/>del mes]
+    end
+    subgraph OP[Operaciones]
+        D[Calcular aprobadas<br/>sobre intentos] --> E[Revisar tablero<br/>cuando hay tiempo]
+        E --> F{¿Algo se ve<br/>raro?}
+        F -- No --> Z1(((Fin)))
+    end
+    subgraph AN[Analista]
+        G[Exportar cobros<br/>a Excel] --> H[Probar región,<br/>emisor, canal y hora]
+        H --> I{¿Apareció<br/>el culpable?}
+        I -- No --> H
+        I -- Sí --> J[Escalar al área<br/>dueña]
+    end
+    subgraph GER[Gerencia]
+        K{¿Las cifras de Finanzas<br/>y Operaciones coinciden?}
+        K -- No --> L[Pedir conciliar<br/>las definiciones]
+        K -- Sí --> M[Tomar decisión]
+    end
+    C --> K
+    E --> K
+    F -- Sí --> G
+    L --> B
+    J --> M
+    M --> Z2(((Fin)))
+    classDef sobrio fill:#f4f4f4,stroke:#555,color:#222
+    class B,C,D,E,G,H,J,L,M sobrio
+```
+
+Los problemas están en tres lugares. Hay dos definiciones de la misma métrica, y cada mes se reprocesa para conciliarlas. La detección depende de que alguien mire el tablero, así que una falla de unas horas, como la caída de un emisor un viernes al mediodía, puede pasar sin que nadie la note. Y la búsqueda de la causa es un ciclo manual de prueba y error que no deja rastro de qué se revisó.
+
+## TO BE: una definición, alerta diaria y causa por segmento
 
 ```mermaid
 flowchart LR
@@ -51,7 +91,19 @@ flowchart LR
     class A,FIN1,FIN2,M evento
 ```
 
-Antes el carril del sistema lo hacía una persona en Excel. Ahora el analista recibe la alerta con la dimensión que la explica.
+El carril del Sistema está en el código, igual que el comando `explicar` con `--donde` que usa el analista. Revisar el calendario, escalar y corregir la falla son tareas de las personas y no están programadas.
+
+## Cómo cambian los indicadores
+
+| Indicador | AS IS | TO BE |
+|---|---|---|
+| Definiciones de la tasa de aprobación en uso | dos, una por área | una, en el YAML versionado |
+| Incidentes detectados con su segmento | dependía de que alguien mirara | 4 de 4, tres el mismo día y el bug de la app al tercer día |
+| Falsas alarmas | no se medían | 10 días-alerta sin incidente de 1,098 revisados (0.9%) |
+| Búsqueda de la causa | manual, dimensión por dimensión | descomposición mezcla y tasa en todas las dimensiones a la vez |
+| Lectura de una caída del ticket promedio | sin separar mezcla de tasa | mezcla -S/ 7.97 y tasa +S/ 0.17 entre abril y agosto de 2026 |
+
+Las cifras de la columna TO BE salen de la corrida del monitor que se describe más abajo.
 
 ## Piezas
 
