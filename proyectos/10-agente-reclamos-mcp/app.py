@@ -238,6 +238,11 @@ with t_juez:
             tooltip=["juez", "defecto", "mensajes", alt.Tooltip("detectados:Q", format=".0%")])
         st.altair_chart(tema(barras.properties(height=300)), width="stretch")
         for nombre, m in j.items():
+            vc = m.get("validacion_correccion")
+            if vc:
+                st.caption(f"{nombre}: calibrando con una mitad y estimando la tasa de aprobación de la otra "
+                           f"({vc['repeticiones']} particiones), el error medio es {vc['error_observada']:.1%} sin "
+                           f"corregir y {vc['error_corregida']:.1%} corregido.")
             for tabla, o in m.get("objetivos", {}).items():
                 st.caption(f"{nombre} sobre {tabla}: aprueba {o['observada']:.1%}; corregido por su error medido, "
                            f"{o['corregida']:.1%} (IC 95% {o['ic_bajo']:.1%} a {o['ic_alto']:.1%}).")

@@ -177,3 +177,29 @@ def recall_por_defecto(set_juez: pd.DataFrame, columna_juez: str) -> pd.DataFram
     return (malos.assign(detectado=~malos[columna_juez].astype(bool))
             .groupby("defecto").agg(mensajes=("detectado", "size"), detectados=("detectado", "mean"))
             .reset_index())
+
+
+def validar_correccion(set_juez: pd.DataFrame, columna_juez: str, repeticiones: int = 500,
+                       seed: int = 8) -> dict:
+    """
+    Prueba la corrección sin hacer trampa: calibra con una mitad del set y
+    estima la tasa real de aprobación de la otra mitad, muchas veces.
+    Devuelve el error absoluto medio de la tasa que da el juez y de la corregida.
+    """
+    rng = np.random.default_rng(seed)
+    e = set_juez.etiqueta.to_numpy(dtype=bool)
+    j = set_juez[columna_juez].to_numpy(dtype=bool)
+    err_obs, err_cor = [], []
+    for _ in range(repeticiones):
+        idx = rng.permutation(len(e))
+        a, b = idx[: len(e) // 2], idx[len(e) // 2:]
+        if e[a].all() or (~e[a]).all():
+            continue
+        sens, esp = j[a][e[a]].mean(), 1 - j[a][~e[a]].mean()
+        corregida = tasa_corregida(j[b].mean(), sens, esp)
+        if np.isnan(corregida):
+            continue
+        err_obs.append(abs(j[b].mean() - e[b].mean()))
+        err_cor.append(abs(corregida - e[b].mean()))
+    return {"repeticiones": len(err_obs), "error_observada": float(np.mean(err_obs)),
+            "error_corregida": float(np.mean(err_cor)), "tasa_real": float(e.mean())}

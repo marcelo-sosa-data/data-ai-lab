@@ -160,15 +160,21 @@ def cmd_juez(a) -> None:
     mensajes_llm = {t: out.execute(f"SELECT mensaje, accion, monto_abonado FROM {t} WHERE mensaje <> ''").df()
                     for t in sorted(t for t in tablas if t.startswith("to_be_llm"))}
     previo = out.execute("SELECT * FROM set_juez").df() if a.reusar and "set_juez" in tablas else None
+    previas = {}
+    if a.reusar and "resumen" in tablas:
+        fila = out.execute("SELECT datos FROM resumen WHERE corrida = 'juez'").fetchone()
+        previas = json.loads(fila[0]) if fila else {}
     out.close()
     sj = armar(base, a.n, seed=a.seed)
+    if previo is not None and previo.mensaje.tolist() != sj.mensaje.tolist():
+        previo, previas = None, {}  # el set cambió: no hay nada que reusar
     jueces = [jz.JuezReglas()]
     if not a.solo_reglas and os.getenv("LLM_API_KEY"):
         jueces.append(jz.JuezLLM())
     metricas = {}
     for juez in jueces:
         col = f"juez_{juez.nombre}"
-        if previo is not None and col in previo and previo.mensaje.tolist() == sj.mensaje.tolist():
+        if previo is not None and col in previo:
             # --reusar: el set no cambió, se toman los veredictos ya calculados
             sj[col], sj[col + "_falla"] = previo[col].values, previo[col + "_falla"].values
         else:
@@ -181,6 +187,7 @@ def cmd_juez(a) -> None:
             sj[col + "_falla"] = [",".join(v.falla) for v in veredictos]
         m = jz.matriz(sj.etiqueta, sj[col])
         m["recall_por_defecto"] = jz.recall_por_defecto(sj, col).to_dict("records")
+        m["validacion_correccion"] = jz.validar_correccion(sj, col)
         # aplicado a los mensajes de las corridas con LLM, que no tienen etiqueta
         objetivos = {}
         for tabla, msgs in mensajes_llm.items():
@@ -192,11 +199,21 @@ def cmd_juez(a) -> None:
         metricas[juez.nombre] = m
         consola.print(f"[bold]{juez.nombre}[/] n={m['n']} sensibilidad={m['sensibilidad']:.1%} "
                       f"especificidad={m['especificidad']:.1%} kappa={m['kappa']:.2f}")
+        vc = m["validacion_correccion"]
+        consola.print(f"   tasa de aprobación en media muestra: error {vc['error_observada']:.1%} sin corregir, "
+                      f"{vc['error_corregida']:.1%} corregida ({vc['repeticiones']} particiones)")
         for d in m["recall_por_defecto"]:
             consola.print(f"   {d['defecto']:<14} {d['mensajes']:>3} detectados {d['detectados']:.0%}")
         for tabla, o in objetivos.items():
             consola.print(f"   {tabla}: aprueba {o['observada']:.1%}, corregida {o['corregida']:.1%} "
                           f"[{o['ic_bajo']:.1%}, {o['ic_alto']:.1%}]")
+    # --reusar conserva los jueces que no se corrieron esta vez (por ejemplo, el LLM sin clave a mano)
+    if previo is not None:
+        for nombre, m in previas.items():
+            col = f"juez_{nombre}"
+            if nombre not in metricas and col in previo:
+                sj[col], sj[col + "_falla"] = previo[col].values, previo[col + "_falla"].values
+                metricas[nombre] = m
     out = duckdb.connect(str(ruta_resultados()))
     out.register("sj", sj)
     out.execute("CREATE OR REPLACE TABLE set_juez AS SELECT * FROM sj")

@@ -59,3 +59,16 @@ def test_set_del_juez(sistemas, ruta_db):
     assert sj.etiqueta.sum() > 10 and (~sj.etiqueta).sum() > 10
     assert (sj.etiqueta == (sj.defecto == "ninguno")).all()
     assert armar(t, 60, seed=4).mensaje.tolist() == sj.mensaje.tolist()
+
+
+def test_la_correccion_baja_el_error_de_un_juez_sesgado():
+    import numpy as np
+
+    from reclamos.juez import validar_correccion
+
+    rng = np.random.default_rng(0)
+    etiqueta = rng.random(300) < 0.5
+    # juez que aprueba de más: deja pasar 60% de lo malo
+    juez = np.where(etiqueta, rng.random(300) < 0.9, rng.random(300) < 0.6)
+    r = validar_correccion(pd.DataFrame({"etiqueta": etiqueta, "j": juez}), "j", repeticiones=200)
+    assert r["error_corregida"] < r["error_observada"]
