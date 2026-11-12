@@ -1,0 +1,21 @@
+# Un ambiente por workspace de Fabric. Lo que cambia entre ambientes son los
+# parámetros del modelo; el resto del TMDL es el mismo en los tres.
+# Los id de workspace no van aquí: vienen de variables del repositorio en GitHub.
+
+dev:
+  workspace: Mirasol BI - Desarrollo
+  variable_workspace_id: FABRIC_WORKSPACE_DEV
+  parametros:
+    RutaDatos: https://mirasoldatos.dfs.core.windows.net/matricula-dev
+
+test:
+  workspace: Mirasol BI - Pruebas
+  variable_workspace_id: FABRIC_WORKSPACE_TEST
+  parametros:
+    RutaDatos: https://mirasoldatos.dfs.core.windows.net/matricula-test
+
+prod:
+  workspace: Mirasol BI
+  variable_workspace_id: FABRIC_WORKSPACE_PROD
+  parametros:
+    RutaDatos: https://mirasoldatos.dfs.core.windows.net/matricula-prod

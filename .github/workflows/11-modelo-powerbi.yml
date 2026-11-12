@@ -1,0 +1,120 @@
+name: 11 modelo de Power BI
+
+on:
+  pull_request:
+    paths:
+      - "proyectos/11-modelo-powerbi-como-codigo/**"
+      - ".github/workflows/11-modelo-powerbi.yml"
+  push:
+    branches: [main]
+    paths:
+      - "proyectos/11-modelo-powerbi-como-codigo/**"
+      - ".github/workflows/11-modelo-powerbi.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: modelo-matricula-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: proyectos/11-modelo-powerbi-como-codigo
+
+jobs:
+  validar:
+    name: Reglas, pruebas de medidas y plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - name: Generar datos de prueba
+        run: python -m semantico generar
+      - name: Reglas sobre el TMDL
+        run: python -m semantico revisar
+      - name: Medidas contra el SQL de referencia
+        run: python -m semantico probar
+      - name: Tests
+        run: pytest -q
+      - name: Plan de cambios frente a la rama base
+        if: github.event_name == 'pull_request'
+        run: |
+          python -m semantico plan --base "origin/${{ github.base_ref }}" --salida plan.md
+          cat plan.md >> "$GITHUB_STEP_SUMMARY"
+
+  # Los tres trabajos de publicación solo corren si el repositorio tiene la
+  # variable FABRIC_HABILITADO = true y los secretos del service principal.
+  # prod tiene revisores obligatorios en la configuración del environment.
+  dev:
+    needs: validar
+    if: github.event_name == 'push' && vars.FABRIC_HABILITADO == 'true'
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      FABRIC_WORKSPACE_DEV: ${{ vars.FABRIC_WORKSPACE_DEV }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[publicar]"
+      - run: python -m semantico construir --ambiente dev
+      - run: python -m semantico publicar --ambiente dev
+
+  test:
+    needs: dev
+    runs-on: ubuntu-latest
+    environment: test
+    env:
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      FABRIC_WORKSPACE_TEST: ${{ vars.FABRIC_WORKSPACE_TEST }}
+      SEMANTICO_DATOS: ${{ github.workspace }}/datos-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[publicar]"
+      - run: python -m semantico construir --ambiente test
+      - run: python -m semantico publicar --ambiente test
+      - name: Refrescar el modelo publicado
+        run: python -m semantico refrescar --ambiente test --dataset "${{ vars.FABRIC_DATASET_TEST }}"
+      - uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          allow-no-subscriptions: true
+      - name: Descargar los Parquet de test
+        run: |
+          mkdir -p "$SEMANTICO_DATOS"
+          az storage fs file download-batch --account-name mirasoldatos --source matricula-test \
+            --destination "$SEMANTICO_DATOS" --auth-mode login
+      - name: Mismas pruebas contra el modelo publicado
+        run: python -m semantico probar --servicio "${{ vars.FABRIC_DATASET_TEST }}"
+
+  prod:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: prod
+    env:
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      FABRIC_WORKSPACE_PROD: ${{ vars.FABRIC_WORKSPACE_PROD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[publicar]"
+      - run: python -m semantico construir --ambiente prod
+      - run: python -m semantico publicar --ambiente prod
+      - run: python -m semantico refrescar --ambiente prod --dataset "${{ vars.FABRIC_DATASET_PROD }}"
