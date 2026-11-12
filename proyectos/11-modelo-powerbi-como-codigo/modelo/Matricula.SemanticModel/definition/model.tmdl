@@ -1,0 +1,16 @@
+model Model
+	culture: es-PE
+	defaultPowerBIDataSourceVersion: powerBI_V3
+	discourageImplicitMeasures
+	sourceQueryCulture: es-PE
+
+	annotation PBI_QueryOrder = ["RutaDatos","Periodo","Sede","Carrera","Curso","Alumno","Matricula","Seccion","Inscripcion"]
+
+ref table Periodo
+ref table Sede
+ref table Carrera
+ref table Curso
+ref table Alumno
+ref table Matricula
+ref table Seccion
+ref table Inscripcion

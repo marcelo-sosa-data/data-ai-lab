@@ -1,0 +1,48 @@
+/// Cursos del plan de estudios, con el ciclo al que pertenecen.
+table Curso
+	lineageTag: 7a5a3995-e965-5e9d-b2cd-826d837cd857
+
+	column id_curso
+		dataType: int64
+		formatString: 0
+		isKey
+		isHidden
+		lineageTag: b8f08271-f574-54f1-97bb-160eabc48134
+		summarizeBy: none
+		sourceColumn: id_curso
+
+	column curso
+		dataType: string
+		lineageTag: eb55817e-5bb9-591c-a092-c9bbb66c4f25
+		summarizeBy: none
+		sourceColumn: curso
+
+	column id_carrera
+		dataType: int64
+		formatString: 0
+		isHidden
+		lineageTag: f5fb5898-233a-587b-a1d3-807ffe3e8646
+		summarizeBy: none
+		sourceColumn: id_carrera
+
+	column ciclo
+		dataType: int64
+		formatString: 0
+		lineageTag: 575adeb6-9902-526d-9c87-b8d9b099ef22
+		summarizeBy: none
+		sourceColumn: ciclo
+
+	column creditos
+		dataType: int64
+		formatString: 0
+		lineageTag: 3f5e959c-0569-5e6c-ad4d-b2960f594019
+		summarizeBy: none
+		sourceColumn: creditos
+
+	partition Curso = m
+		mode: import
+		source =
+				let
+					Origen = Parquet.Document(AzureStorage.DataLakeContents(RutaDatos & "/curso.parquet"))
+				in
+					Origen

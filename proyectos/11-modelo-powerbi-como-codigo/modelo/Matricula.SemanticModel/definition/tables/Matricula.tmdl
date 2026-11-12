@@ -1,0 +1,188 @@
+/// Una fila por alumno y periodo con matrícula registrada, incluso si después se retiró de todos sus cursos.
+table Matricula
+	lineageTag: f1215d75-390c-5256-8ffd-514d52a3db03
+
+	/// Alumnos con al menos un curso vigente en el periodo. No cuenta a quien se retiró de todos sus cursos. Es la definición acordada con Registros Académicos y la que usan todos los reportes.
+	measure 'Alumnos matriculados' =
+			CALCULATE (
+				DISTINCTCOUNT ( Matricula[id_alumno] ),
+				Matricula[retiro_total] = FALSE ()
+			)
+		formatString: #,0
+		displayFolder: Matrícula
+		lineageTag: bff94ba2-0df2-5140-8f4d-d71a91fba570
+
+	/// Alumnos matriculados en su primer periodo en la universidad.
+	measure Ingresantes = CALCULATE ( [Alumnos matriculados], Matricula[tipo_alumno] = "Ingresante" )
+		formatString: #,0
+		displayFolder: Matrícula
+		lineageTag: fbb6d4cf-983e-5167-b006-5a3f4684aa6c
+
+	/// Alumnos matriculados que también estudiaron el periodo anterior.
+	measure Continuadores = CALCULATE ( [Alumnos matriculados], Matricula[tipo_alumno] = "Continuador" )
+		formatString: #,0
+		displayFolder: Matrícula
+		lineageTag: a892711f-6c7a-59a3-9643-c00dc5990a48
+
+	/// Alumnos matriculados que vuelven después de al menos un periodo sin estudiar.
+	measure Reincorporados = CALCULATE ( [Alumnos matriculados], Matricula[tipo_alumno] = "Reincorporado" )
+		formatString: #,0
+		displayFolder: Matrícula
+		lineageTag: 5678f68f-ec5e-5a43-846f-47aebfb0315b
+
+	/// Alumnos que se matricularon y se retiraron de todos sus cursos. No entran en Alumnos matriculados.
+	measure 'Retiros totales' =
+			CALCULATE (
+				DISTINCTCOUNT ( Matricula[id_alumno] ),
+				Matricula[retiro_total] = TRUE ()
+			)
+		formatString: #,0
+		displayFolder: Matrícula
+		lineageTag: 51ff2472-0c04-581a-ae7f-12f050942437
+
+	/// Matriculados con 12 créditos vigentes o más. Es el criterio de alumno regular del reglamento.
+	measure 'Alumnos regulares' = CALCULATE ( [Alumnos matriculados], Matricula[creditos_vigentes] >= 12 )
+		formatString: #,0
+		displayFolder: Matrícula
+		lineageTag: 0ab898ab-dfa2-53d1-be91-cabfddc7a391
+
+	/// Créditos vigentes por alumno matriculado.
+	measure 'Créditos promedio' = DIVIDE ( SUM ( Matricula[creditos_vigentes] ), [Alumnos matriculados] )
+		formatString: 0.0
+		displayFolder: Matrícula
+		lineageTag: d6e2ab55-ac46-5546-b7a9-432207369a15
+
+	/// Matriculados del mismo semestre del año anterior (2026-2 contra 2025-2). Queda en blanco si no hay un solo periodo seleccionado o si el periodo no tiene año anterior en el modelo.
+	measure 'Matriculados año anterior' =
+			VAR orden = SELECTEDVALUE ( Periodo[orden] )
+			RETURN
+				IF (
+					NOT ISBLANK ( orden ),
+					CALCULATE ( [Alumnos matriculados], REMOVEFILTERS ( Periodo ), Periodo[orden] = orden - 2 )
+				)
+		formatString: #,0
+		displayFolder: Comparación anual
+		lineageTag: 2e5d7a36-f59f-52b9-963a-a47c22724676
+
+	/// Variación de Alumnos matriculados contra el mismo semestre del año anterior.
+	measure 'Var. matriculados vs año anterior' =
+			DIVIDE ( [Alumnos matriculados] - [Matriculados año anterior], [Matriculados año anterior] )
+		formatString: +0.0%;-0.0%;0.0%
+		displayFolder: Comparación anual
+		lineageTag: 28e1dc28-813b-58c1-bfdd-16d2797f90b5
+
+	/// Ingresantes del mismo semestre del año anterior.
+	measure 'Ingresantes año anterior' =
+			VAR orden = SELECTEDVALUE ( Periodo[orden] )
+			RETURN
+				IF (
+					NOT ISBLANK ( orden ),
+					CALCULATE ( [Ingresantes], REMOVEFILTERS ( Periodo ), Periodo[orden] = orden - 2 )
+				)
+		formatString: #,0
+		displayFolder: Comparación anual
+		lineageTag: 8495bf1f-6429-5668-8413-34b7a3a7c86b
+
+	/// Variación de Ingresantes contra el mismo semestre del año anterior.
+	measure 'Var. ingresantes vs año anterior' =
+			DIVIDE ( [Ingresantes] - [Ingresantes año anterior], [Ingresantes año anterior] )
+		formatString: +0.0%;-0.0%;0.0%
+		displayFolder: Comparación anual
+		lineageTag: b87f863a-6cde-501d-8b71-b024fe3205b6
+
+	/// Parte de los matriculados que pagó la primera cuota.
+	measure '% pagó primera cuota' =
+			DIVIDE (
+				CALCULATE ( [Alumnos matriculados], Matricula[pago_primera_cuota] = TRUE () ),
+				[Alumnos matriculados]
+			)
+		formatString: 0.0%
+		displayFolder: Pagos
+		lineageTag: ee5bd263-4f80-559e-8c70-ffcb1b616385
+
+	/// Parte de los matriculados de todas las sedes que corresponde a la sede filtrada. Respeta los demás filtros.
+	measure '% del total de sedes' =
+			DIVIDE ( [Alumnos matriculados], CALCULATE ( [Alumnos matriculados], REMOVEFILTERS ( Sede ) ) )
+		formatString: 0.0%
+		displayFolder: Matrícula
+		lineageTag: 2ac20ac1-cf20-5713-b0cf-595114a14233
+
+	column id_alumno
+		dataType: int64
+		formatString: 0
+		isHidden
+		lineageTag: a202dcc5-4028-593c-8b09-02dc3401b901
+		summarizeBy: none
+		sourceColumn: id_alumno
+
+	column id_periodo
+		dataType: int64
+		formatString: 0
+		isHidden
+		lineageTag: 2dec29df-9fbc-50e6-ad49-e447b812d18e
+		summarizeBy: none
+		sourceColumn: id_periodo
+
+	column id_sede
+		dataType: int64
+		formatString: 0
+		isHidden
+		lineageTag: 56c4cdd0-989a-5f76-bd91-f5b527b3af54
+		summarizeBy: none
+		sourceColumn: id_sede
+
+	column id_carrera
+		dataType: int64
+		formatString: 0
+		isHidden
+		lineageTag: 93c15c9d-e1da-5c2c-8551-e95751b406f8
+		summarizeBy: none
+		sourceColumn: id_carrera
+
+	column modalidad
+		dataType: string
+		lineageTag: 698e96cc-b44d-5d67-b7c5-41f1accb3dd7
+		summarizeBy: none
+		sourceColumn: modalidad
+
+	column tipo_alumno
+		dataType: string
+		lineageTag: 7b85c18b-1509-5e1c-b197-5bcfcc0d7e40
+		summarizeBy: none
+		sourceColumn: tipo_alumno
+
+	column ciclo
+		dataType: int64
+		formatString: 0
+		lineageTag: 00b99683-a22f-5972-a754-61d2dc3e3dee
+		summarizeBy: none
+		sourceColumn: ciclo
+
+	column creditos_vigentes
+		dataType: int64
+		formatString: 0
+		lineageTag: 6193fde0-6994-5727-a78c-d7a4b48b4a3e
+		summarizeBy: sum
+		sourceColumn: creditos_vigentes
+
+	column pago_primera_cuota
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 1368b9ef-e3fb-5ba4-91fb-20dc43e589f6
+		summarizeBy: none
+		sourceColumn: pago_primera_cuota
+
+	column retiro_total
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 0f5c7ac3-4182-56ab-b6f9-80f448db335c
+		summarizeBy: none
+		sourceColumn: retiro_total
+
+	partition Matricula = m
+		mode: import
+		source =
+				let
+					Origen = Parquet.Document(AzureStorage.DataLakeContents(RutaDatos & "/matricula.parquet"))
+				in
+					Origen

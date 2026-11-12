@@ -1,0 +1,39 @@
+relationship 71a9e191-bf08-515b-b6ef-3bf2084bdce7
+	fromColumn: Matricula.id_periodo
+	toColumn: Periodo.id_periodo
+
+relationship 33378678-5860-5720-93ce-b6cb29c58cf9
+	fromColumn: Matricula.id_sede
+	toColumn: Sede.id_sede
+
+relationship de5d5edd-5678-5363-8bb3-ed2d926f33b9
+	fromColumn: Matricula.id_carrera
+	toColumn: Carrera.id_carrera
+
+relationship 9c7317dc-645c-523a-9c9a-c0e7c6f43c07
+	fromColumn: Matricula.id_alumno
+	toColumn: Alumno.id_alumno
+
+relationship ea72f5e3-ca0d-55ed-b904-a43c34a1243a
+	fromColumn: Seccion.id_periodo
+	toColumn: Periodo.id_periodo
+
+relationship 39c67f95-c57e-521b-a282-7cdc4f11cab9
+	fromColumn: Seccion.id_sede
+	toColumn: Sede.id_sede
+
+relationship 9f3e1c10-de62-575c-be14-f53470bc9453
+	fromColumn: Seccion.id_curso
+	toColumn: Curso.id_curso
+
+relationship 3db8eaac-4b99-5213-9396-8fb1a8ca5f96
+	fromColumn: Curso.id_carrera
+	toColumn: Carrera.id_carrera
+
+relationship 70ef4710-b99e-5fc5-bd5f-e1ec3cd4cee1
+	fromColumn: Inscripcion.id_seccion
+	toColumn: Seccion.id_seccion
+
+relationship 78e4327b-f6e6-5f8b-a86f-98d34964b354
+	fromColumn: Inscripcion.id_alumno
+	toColumn: Alumno.id_alumno

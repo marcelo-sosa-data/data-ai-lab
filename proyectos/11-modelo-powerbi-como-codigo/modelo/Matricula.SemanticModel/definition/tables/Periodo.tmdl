@@ -1,0 +1,49 @@
+/// Periodos académicos. orden es correlativo y sirve para comparar con el mismo semestre del año anterior (orden - 2).
+table Periodo
+	lineageTag: 3b758c35-2a08-5df2-a97c-1c57a760d11e
+
+	column id_periodo
+		dataType: int64
+		formatString: 0
+		isKey
+		isHidden
+		lineageTag: 9c467602-65a5-5e79-962b-f95956ed3a67
+		summarizeBy: none
+		sourceColumn: id_periodo
+
+	column periodo
+		dataType: string
+		lineageTag: face6207-e4dc-5ea4-8bd0-d8edba58d17f
+		summarizeBy: none
+		sourceColumn: periodo
+		sortByColumn: orden
+
+	column anio
+		dataType: int64
+		formatString: 0
+		lineageTag: b1d56d3c-2926-5d5d-83e8-4f6d45af43cc
+		summarizeBy: none
+		sourceColumn: anio
+
+	column semestre
+		dataType: int64
+		formatString: 0
+		lineageTag: 076dd350-eca0-52f3-ac9b-4ffc162276b0
+		summarizeBy: none
+		sourceColumn: semestre
+
+	column orden
+		dataType: int64
+		formatString: 0
+		isHidden
+		lineageTag: 4cefcf29-09ad-5d7e-9e86-8017afc5a14f
+		summarizeBy: none
+		sourceColumn: orden
+
+	partition Periodo = m
+		mode: import
+		source =
+				let
+					Origen = Parquet.Document(AzureStorage.DataLakeContents(RutaDatos & "/periodo.parquet"))
+				in
+					Origen

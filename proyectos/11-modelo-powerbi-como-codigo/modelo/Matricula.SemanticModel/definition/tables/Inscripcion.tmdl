@@ -1,0 +1,65 @@
+/// Una fila por alumno y sección. estado es Vigente o Retirado.
+table Inscripcion
+	lineageTag: 4b557c73-1236-5675-abe3-990332422b93
+
+	/// Inscripciones a secciones que siguen vigentes.
+	measure 'Inscripciones vigentes' = CALCULATE ( COUNTROWS ( Inscripcion ), Inscripcion[estado] = "Vigente" )
+		formatString: #,0
+		displayFolder: Secciones
+		lineageTag: 4aef44d2-4ddb-5620-ba5d-9da4afeaf54e
+
+	/// Parte de las inscripciones del periodo que terminó en retiro del curso.
+	measure '% retiro de cursos' =
+			DIVIDE (
+				CALCULATE ( COUNTROWS ( Inscripcion ), Inscripcion[estado] = "Retirado" ),
+				COUNTROWS ( Inscripcion )
+			)
+		formatString: 0.0%
+		displayFolder: Secciones
+		lineageTag: 5c908e13-7c44-5dff-898a-26d897f6dbd3
+
+	column id_inscripcion
+		dataType: int64
+		formatString: 0
+		isKey
+		isHidden
+		lineageTag: 58f8957c-a3a8-536a-8b0e-6fc048ddce83
+		summarizeBy: none
+		sourceColumn: id_inscripcion
+
+	column id_alumno
+		dataType: int64
+		formatString: 0
+		isHidden
+		lineageTag: 5dc80a45-7c4c-574e-999a-a7b5d69620ee
+		summarizeBy: none
+		sourceColumn: id_alumno
+
+	column id_seccion
+		dataType: int64
+		formatString: 0
+		isHidden
+		lineageTag: ed0d8d27-7342-5823-8dff-0df8fabd9e0a
+		summarizeBy: none
+		sourceColumn: id_seccion
+
+	column creditos
+		dataType: int64
+		formatString: 0
+		lineageTag: 704c9e57-b1f9-5d8b-8dbc-88e50484e31d
+		summarizeBy: sum
+		sourceColumn: creditos
+
+	column estado
+		dataType: string
+		lineageTag: 57bffa93-5dd3-550e-9fc7-f95da52562bb
+		summarizeBy: none
+		sourceColumn: estado
+
+	partition Inscripcion = m
+		mode: import
+		source =
+				let
+					Origen = Parquet.Document(AzureStorage.DataLakeContents(RutaDatos & "/inscripcion.parquet"))
+				in
+					Origen

@@ -1,0 +1,69 @@
+/// Secciones abiertas por periodo, sede y curso, con sus vacantes.
+table Seccion
+	lineageTag: b38d14a5-a5d9-539a-a4ff-029eaadc67df
+
+	/// Vacantes ofrecidas en las secciones abiertas.
+	measure Vacantes = SUM ( Seccion[vacantes] )
+		formatString: #,0
+		displayFolder: Secciones
+		lineageTag: a5fcd738-9a24-5486-9b95-d1bf35a845fd
+
+	/// Inscripciones vigentes entre vacantes ofrecidas. Los retiros de curso liberan la vacante.
+	measure 'Ocupación %' = DIVIDE ( [Inscripciones vigentes], [Vacantes] )
+		formatString: 0.0%
+		displayFolder: Secciones
+		lineageTag: c08f46d7-3aac-54df-ac77-c28121032383
+
+	/// Secciones con menos de 40% de ocupación, el umbral con el que Registros Académicos evalúa cerrar o fusionar. Una sección sin inscritos vigentes también cuenta.
+	measure 'Secciones bajo 40%' = COUNTROWS ( FILTER ( Seccion, [Ocupación %] < 0.4 ) )
+		formatString: #,0
+		displayFolder: Secciones
+		lineageTag: 3d060054-e128-5b43-aef7-c85529a55898
+
+	column id_seccion
+		dataType: int64
+		formatString: 0
+		isKey
+		isHidden
+		lineageTag: 43a46d75-f1e6-58a2-991e-b2d69adaae4b
+		summarizeBy: none
+		sourceColumn: id_seccion
+
+	column id_periodo
+		dataType: int64
+		formatString: 0
+		isHidden
+		lineageTag: f36bddb5-fc44-5f2a-a4a9-76a19dc6d369
+		summarizeBy: none
+		sourceColumn: id_periodo
+
+	column id_sede
+		dataType: int64
+		formatString: 0
+		isHidden
+		lineageTag: b8c847f9-7dbd-546e-875b-efaa3bc790fb
+		summarizeBy: none
+		sourceColumn: id_sede
+
+	column id_curso
+		dataType: int64
+		formatString: 0
+		isHidden
+		lineageTag: 3ddfecf2-65c2-5ca1-98b3-22b3ec40bbc3
+		summarizeBy: none
+		sourceColumn: id_curso
+
+	column vacantes
+		dataType: int64
+		formatString: 0
+		lineageTag: 99c6e778-8bc2-51be-b0f6-7ae805470377
+		summarizeBy: sum
+		sourceColumn: vacantes
+
+	partition Seccion = m
+		mode: import
+		source =
+				let
+					Origen = Parquet.Document(AzureStorage.DataLakeContents(RutaDatos & "/seccion.parquet"))
+				in
+					Origen

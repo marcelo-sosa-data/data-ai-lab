@@ -1,0 +1,38 @@
+/// Maestro de alumnos.
+table Alumno
+	lineageTag: f81484d3-05c6-5372-b617-73d274923d15
+
+	column id_alumno
+		dataType: int64
+		formatString: 0
+		isKey
+		isHidden
+		lineageTag: b99bcb1d-2c03-570b-ad36-9384cb52d3b2
+		summarizeBy: none
+		sourceColumn: id_alumno
+
+	column codigo
+		dataType: string
+		lineageTag: 32f9678f-a42e-5b98-9058-8d053788bb9e
+		summarizeBy: none
+		sourceColumn: codigo
+
+	column periodo_ingreso
+		dataType: string
+		lineageTag: 8d003e6e-7db9-5baf-9162-15ae1e66da93
+		summarizeBy: none
+		sourceColumn: periodo_ingreso
+
+	column tipo_colegio
+		dataType: string
+		lineageTag: ca3f07e3-f88a-56ad-be09-bb3db18a0bbd
+		summarizeBy: none
+		sourceColumn: tipo_colegio
+
+	partition Alumno = m
+		mode: import
+		source =
+				let
+					Origen = Parquet.Document(AzureStorage.DataLakeContents(RutaDatos & "/alumno.parquet"))
+				in
+					Origen

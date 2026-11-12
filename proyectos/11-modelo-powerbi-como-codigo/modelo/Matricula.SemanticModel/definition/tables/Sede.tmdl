@@ -1,0 +1,32 @@
+/// Sedes de la universidad.
+table Sede
+	lineageTag: dfb51770-306e-50df-ab91-02360f4e8f3e
+
+	column id_sede
+		dataType: int64
+		formatString: 0
+		isKey
+		isHidden
+		lineageTag: 8b0e1c6a-eb31-5725-9782-41d8b05bbff3
+		summarizeBy: none
+		sourceColumn: id_sede
+
+	column sede
+		dataType: string
+		lineageTag: 7495af5e-5175-5d23-b649-3516591e68b8
+		summarizeBy: none
+		sourceColumn: sede
+
+	column ciudad
+		dataType: string
+		lineageTag: e5f3f67e-de4d-5bcc-967a-854b7545e1c9
+		summarizeBy: none
+		sourceColumn: ciudad
+
+	partition Sede = m
+		mode: import
+		source =
+				let
+					Origen = Parquet.Document(AzureStorage.DataLakeContents(RutaDatos & "/sede.parquet"))
+				in
+					Origen

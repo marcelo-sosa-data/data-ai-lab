@@ -1,0 +1,6 @@
+/// Carpeta del lago de datos con los Parquet del pipeline de matrícula. El valor de cada ambiente está en ambientes.yaml y se reemplaza al construir.
+expression RutaDatos = "https://mirasoldatos.dfs.core.windows.net/matricula-dev" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: 975d600c-dceb-52f8-aec4-cf408ad3f1db
+	queryGroup: Parámetros
+
+	annotation PBI_ResultType = Text
