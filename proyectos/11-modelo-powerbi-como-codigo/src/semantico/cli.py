@@ -24,6 +24,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from . import despliegue as D
@@ -109,7 +110,7 @@ def cmd_revisar(args) -> int:
             t.add_column(c)
         for h in hallazgos:
             t.add_row(h.regla, f"[{'red' if h.severidad == 'error' else 'yellow'}]{h.severidad}[/]",
-                      h.objeto, h.detalle)
+                      escape(h.objeto), escape(h.detalle))
         consola.print(t)
     _guardar("reglas", [asdict(h) for h in hallazgos])
     return 1 if hay_errores(hallazgos) else 0
@@ -136,7 +137,7 @@ def cmd_probar(args) -> int:
         detalle = r.error or "; ".join(f"{k}: esperado {_fmt(e)}, obtuvo {_fmt(o)}"
                                        for k, e, o in r.diferencias[:3])
         t.add_row("[green]ok[/]" if r.ok else "[red]falla[/]", r.caso.id, r.caso.medida,
-                  str(len(r.esperado)), detalle)
+                  str(len(r.esperado)), escape(detalle))
     consola.print(t)
     fallas = sum(not r.ok for r in resultados)
     _guardar("pruebas", [{"id": r.caso.id, "medida": r.caso.medida, "ok": r.ok, "grupos": len(r.esperado),
@@ -233,7 +234,7 @@ def cmd_plan(args) -> int:
     md = D.plan_markdown(p, f"Cambios en el modelo frente a {args.base}")
     if args.salida:
         Path(args.salida).write_text(md, encoding="utf-8")
-    consola.print(md)
+    consola.print(md, markup=False)
     return 0
 
 

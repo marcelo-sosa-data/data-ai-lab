@@ -84,6 +84,7 @@ class Impacto:
     medida: str
     antes: float | None
     despues: float | None
+    porcentaje: bool = False
 
     @property
     def variacion(self) -> float | None:
@@ -182,7 +183,7 @@ def plan(base: Modelo, nuevo: Modelo, carpeta_datos: str | Path | None = None,
         antes = _valor(motor_b, n, p.filtros) if n in base.medidas else None
         despues = _valor(motor_n, n, p.filtros)
         if antes != despues:
-            p.impactos.append(Impacto(n, antes, despues))
+            p.impactos.append(Impacto(n, antes, despues, "%" in nuevo.medidas[n].formato))
     return p
 
 
@@ -242,8 +243,13 @@ def plan_markdown(p: Plan, titulo: str = "Cambios en el modelo") -> str:
         lineas += ["", f"Valores que cambian ({filtro}):", "",
                    "| Medida | Antes | Después | Variación |", "|---|---:|---:|---:|"]
         for i in p.impactos:
-            var = f"{i.variacion:+.1%}" if i.variacion is not None else ""
-            lineas.append(f"| {i.medida} | {_fmt(i.antes)} | {_fmt(i.despues)} | {var} |")
+            if i.porcentaje:
+                f = lambda v: "(en blanco)" if v is None else f"{v:.1%}"  # noqa: E731
+                var = f"{(i.despues - i.antes) * 100:+.1f} pp" if None not in (i.antes, i.despues) else ""
+            else:
+                f = _fmt
+                var = f"{i.variacion:+.1%}" if i.variacion is not None else ""
+            lineas.append(f"| {i.medida} | {f(i.antes)} | {f(i.despues)} | {var} |")
     return "\n".join(lineas) + "\n"
 
 
