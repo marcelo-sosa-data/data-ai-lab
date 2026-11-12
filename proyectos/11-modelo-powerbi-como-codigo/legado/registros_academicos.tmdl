@@ -1,0 +1,9 @@
+table Medidas
+
+	measure Matriculados = DISTINCTCOUNT(Inscripcion[id_alumno])
+		formatString: 0
+
+	measure Ingresantes = CALCULATE(COUNTROWS(Matricula), Matricula[tipo_alumno] = "Ingresante")
+
+	measure Ocupacion = COUNTROWS(Inscripcion) / SUM(Seccion[vacantes])
+		formatString: 0%

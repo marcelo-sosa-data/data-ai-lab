@@ -1,0 +1,8 @@
+table Medidas
+
+	measure Matriculados = CALCULATE(DISTINCTCOUNT(Matricula[id_alumno]), Matricula[pago_primera_cuota] = TRUE())
+
+	measure 'Matriculados AA' = CALCULATE([Matriculados], Periodo[periodo] = "2025-2")
+
+	measure 'Var %' = ([Matriculados] - [Matriculados AA]) / [Matriculados AA]
+		formatString: 0.0%

@@ -1,0 +1,277 @@
+# Pruebas de las medidas del modelo.
+#
+# Cada caso arma un visual (filtros + una columna de agrupación) y compara lo
+# que devuelve la medida DAX contra una consulta SQL de referencia escrita
+# aparte, con la definición acordada con el área dueña del indicador.
+# El SQL corre en DuckDB sobre los mismos Parquet que importa el modelo y
+# devuelve las columnas `clave` y `valor` (sin `clave` si no hay agrupación).
+# Como en un visual de Power BI, un grupo cuyo resultado es BLANK no aparece:
+# en el SQL se filtra con `valor IS NOT NULL` o simplemente no sale la fila.
+
+- id: matriculados_por_sede
+  medida: Alumnos matriculados
+  filtros: {"Periodo[periodo]": "2026-2"}
+  por: Sede[sede]
+  sql: |
+    SELECT s.sede AS clave, COUNT(DISTINCT m.id_alumno) AS valor
+    FROM matricula m JOIN periodo p USING (id_periodo) JOIN sede s USING (id_sede)
+    WHERE p.periodo = '2026-2' AND NOT m.retiro_total
+    GROUP BY 1
+
+- id: matriculados_historico_sin_filtro
+  descripcion: Sin filtro de periodo un alumno que estudió varios ciclos cuenta una vez.
+  medida: Alumnos matriculados
+  sql: |
+    SELECT COUNT(DISTINCT id_alumno) AS valor FROM matricula WHERE NOT retiro_total
+
+- id: matriculados_por_colegio
+  descripcion: Filtro que llega desde el maestro de alumnos.
+  medida: Alumnos matriculados
+  filtros: {"Alumno[tipo_colegio]": "Público"}
+  por: Periodo[periodo]
+  sql: |
+    SELECT p.periodo AS clave, COUNT(DISTINCT m.id_alumno) AS valor
+    FROM matricula m JOIN periodo p USING (id_periodo) JOIN alumno a USING (id_alumno)
+    WHERE a.tipo_colegio = 'Público' AND NOT m.retiro_total
+    GROUP BY 1
+
+- id: ingresantes_por_carrera
+  medida: Ingresantes
+  filtros: {"Periodo[periodo]": "2026-2"}
+  por: Carrera[carrera]
+  sql: |
+    SELECT c.carrera AS clave, COUNT(*) AS valor
+    FROM matricula m JOIN periodo p USING (id_periodo) JOIN carrera c USING (id_carrera)
+    WHERE p.periodo = '2026-2' AND m.tipo_alumno = 'Ingresante' AND NOT m.retiro_total
+    GROUP BY 1
+
+- id: continuadores_por_periodo
+  medida: Continuadores
+  por: Periodo[periodo]
+  sql: |
+    SELECT p.periodo AS clave, COUNT(*) AS valor
+    FROM matricula m JOIN periodo p USING (id_periodo)
+    WHERE m.tipo_alumno = 'Continuador' AND NOT m.retiro_total
+    GROUP BY 1
+
+- id: reincorporados_por_sede
+  medida: Reincorporados
+  filtros: {"Periodo[periodo]": "2026-1"}
+  por: Sede[sede]
+  sql: |
+    SELECT s.sede AS clave, COUNT(*) AS valor
+    FROM matricula m JOIN periodo p USING (id_periodo) JOIN sede s USING (id_sede)
+    WHERE p.periodo = '2026-1' AND m.tipo_alumno = 'Reincorporado' AND NOT m.retiro_total
+    GROUP BY 1
+
+- id: retiros_totales_por_modalidad
+  medida: Retiros totales
+  filtros: {"Periodo[periodo]": "2026-2"}
+  por: Matricula[modalidad]
+  sql: |
+    SELECT m.modalidad AS clave, COUNT(*) AS valor
+    FROM matricula m JOIN periodo p USING (id_periodo)
+    WHERE p.periodo = '2026-2' AND m.retiro_total
+    GROUP BY 1
+
+- id: regulares_por_sede
+  medida: Alumnos regulares
+  filtros: {"Periodo[periodo]": "2026-2"}
+  por: Sede[sede]
+  sql: |
+    SELECT s.sede AS clave, COUNT(*) AS valor
+    FROM matricula m JOIN periodo p USING (id_periodo) JOIN sede s USING (id_sede)
+    WHERE p.periodo = '2026-2' AND NOT m.retiro_total AND m.creditos_vigentes >= 12
+    GROUP BY 1
+
+- id: creditos_promedio_por_carrera
+  medida: Créditos promedio
+  filtros: {"Periodo[periodo]": "2026-2"}
+  por: Carrera[carrera]
+  sql: |
+    SELECT c.carrera AS clave,
+           SUM(m.creditos_vigentes) / COUNT(*) FILTER (WHERE NOT m.retiro_total) AS valor
+    FROM matricula m JOIN periodo p USING (id_periodo) JOIN carrera c USING (id_carrera)
+    WHERE p.periodo = '2026-2'
+    GROUP BY 1
+
+- id: matriculados_anio_anterior_por_periodo
+  descripcion: Los dos primeros periodos no tienen año anterior y quedan en blanco.
+  medida: Matriculados año anterior
+  por: Periodo[periodo]
+  sql: |
+    SELECT p.periodo AS clave, COUNT(*) AS valor
+    FROM periodo p JOIN periodo pa ON pa.orden = p.orden - 2
+    JOIN matricula m ON m.id_periodo = pa.id_periodo AND NOT m.retiro_total
+    GROUP BY 1
+
+- id: var_matriculados_por_sede
+  medida: Var. matriculados vs año anterior
+  filtros: {"Periodo[periodo]": "2026-2"}
+  por: Sede[sede]
+  sql: |
+    WITH n AS (
+      SELECT s.sede, p.periodo, COUNT(*) AS n
+      FROM matricula m JOIN periodo p USING (id_periodo) JOIN sede s USING (id_sede)
+      WHERE NOT m.retiro_total GROUP BY 1, 2)
+    SELECT a.sede AS clave, a.n / b.n - 1 AS valor
+    FROM n a JOIN n b ON a.sede = b.sede AND b.periodo = '2025-2'
+    WHERE a.periodo = '2026-2'
+
+- id: var_matriculados_sin_periodo
+  descripcion: Sin un periodo elegido no hay contra qué comparar.
+  medida: Var. matriculados vs año anterior
+  por: Sede[sede]
+  sql: |
+    SELECT NULL AS clave, NULL AS valor WHERE FALSE
+
+- id: ingresantes_anio_anterior_por_sede
+  medida: Ingresantes año anterior
+  filtros: {"Periodo[periodo]": "2026-2"}
+  por: Sede[sede]
+  sql: |
+    SELECT s.sede AS clave, COUNT(*) AS valor
+    FROM matricula m JOIN periodo p USING (id_periodo) JOIN sede s USING (id_sede)
+    WHERE p.periodo = '2025-2' AND m.tipo_alumno = 'Ingresante' AND NOT m.retiro_total
+    GROUP BY 1
+
+- id: var_ingresantes_por_facultad
+  medida: Var. ingresantes vs año anterior
+  filtros: {"Periodo[periodo]": "2026-2"}
+  por: Carrera[facultad]
+  sql: |
+    WITH n AS (
+      SELECT c.facultad, p.periodo, COUNT(*) AS n
+      FROM matricula m JOIN periodo p USING (id_periodo) JOIN carrera c USING (id_carrera)
+      WHERE NOT m.retiro_total AND m.tipo_alumno = 'Ingresante' GROUP BY 1, 2)
+    SELECT a.facultad AS clave, a.n / b.n - 1 AS valor
+    FROM n a JOIN n b ON a.facultad = b.facultad AND b.periodo = '2025-2'
+    WHERE a.periodo = '2026-2'
+
+- id: pago_primera_cuota_por_tipo
+  medida: "% pagó primera cuota"
+  filtros: {"Periodo[periodo]": "2026-2"}
+  por: Matricula[tipo_alumno]
+  sql: |
+    SELECT m.tipo_alumno AS clave, AVG(m.pago_primera_cuota::INT) AS valor
+    FROM matricula m JOIN periodo p USING (id_periodo)
+    WHERE p.periodo = '2026-2' AND NOT m.retiro_total
+    GROUP BY 1
+
+- id: participacion_por_sede
+  medida: "% del total de sedes"
+  filtros: {"Periodo[periodo]": "2026-2"}
+  por: Sede[sede]
+  sql: |
+    SELECT s.sede AS clave, COUNT(*) / SUM(COUNT(*)) OVER () AS valor
+    FROM matricula m JOIN periodo p USING (id_periodo) JOIN sede s USING (id_sede)
+    WHERE p.periodo = '2026-2' AND NOT m.retiro_total
+    GROUP BY 1
+
+- id: participacion_respeta_otros_filtros
+  descripcion: Quita el filtro de sede pero no el de carrera.
+  medida: "% del total de sedes"
+  filtros: {"Periodo[periodo]": "2026-2", "Carrera[carrera]": "Derecho"}
+  por: Sede[sede]
+  sql: |
+    SELECT s.sede AS clave, COUNT(*) / SUM(COUNT(*)) OVER () AS valor
+    FROM matricula m JOIN periodo p USING (id_periodo) JOIN sede s USING (id_sede)
+    JOIN carrera c USING (id_carrera)
+    WHERE p.periodo = '2026-2' AND c.carrera = 'Derecho' AND NOT m.retiro_total
+    GROUP BY 1
+
+- id: vacantes_por_sede
+  medida: Vacantes
+  filtros: {"Periodo[periodo]": "2026-2"}
+  por: Sede[sede]
+  sql: |
+    SELECT s.sede AS clave, SUM(x.vacantes) AS valor
+    FROM seccion x JOIN periodo p USING (id_periodo) JOIN sede s USING (id_sede)
+    WHERE p.periodo = '2026-2'
+    GROUP BY 1
+
+- id: inscripciones_vigentes_por_sede
+  medida: Inscripciones vigentes
+  filtros: {"Periodo[periodo]": "2026-2"}
+  por: Sede[sede]
+  sql: |
+    SELECT s.sede AS clave, COUNT(*) AS valor
+    FROM inscripcion i JOIN seccion x USING (id_seccion)
+    JOIN periodo p USING (id_periodo) JOIN sede s USING (id_sede)
+    WHERE p.periodo = '2026-2' AND i.estado = 'Vigente'
+    GROUP BY 1
+
+- id: ocupacion_por_facultad
+  descripcion: El filtro de facultad llega a las secciones por Curso.
+  medida: Ocupación %
+  filtros: {"Periodo[periodo]": "2026-2"}
+  por: Carrera[facultad]
+  sql: |
+    WITH sec AS (
+      SELECT x.id_seccion, x.vacantes, c.facultad
+      FROM seccion x JOIN periodo p USING (id_periodo)
+      JOIN curso cu USING (id_curso) JOIN carrera c ON c.id_carrera = cu.id_carrera
+      WHERE p.periodo = '2026-2')
+    SELECT facultad AS clave,
+           (SELECT COUNT(*) FROM inscripcion i JOIN sec s2 USING (id_seccion)
+            WHERE i.estado = 'Vigente' AND s2.facultad = sec.facultad) / SUM(vacantes) AS valor
+    FROM sec GROUP BY 1
+
+- id: ocupacion_arequipa_por_ciclo
+  medida: Ocupación %
+  filtros: {"Periodo[periodo]": "2026-2", "Sede[sede]": "Arequipa"}
+  por: Curso[ciclo]
+  sql: |
+    WITH sec AS (
+      SELECT x.id_seccion, x.vacantes, cu.ciclo
+      FROM seccion x JOIN periodo p USING (id_periodo) JOIN sede s USING (id_sede)
+      JOIN curso cu USING (id_curso)
+      WHERE p.periodo = '2026-2' AND s.sede = 'Arequipa'),
+    vig AS (
+      SELECT sec.ciclo, COUNT(*) AS n FROM inscripcion i JOIN sec USING (id_seccion)
+      WHERE i.estado = 'Vigente' GROUP BY 1)
+    SELECT sec.ciclo AS clave, vig.n / SUM(sec.vacantes) AS valor
+    FROM sec JOIN vig USING (ciclo) GROUP BY sec.ciclo, vig.n
+
+- id: secciones_bajo_40_por_sede
+  descripcion: Una sección sin inscritos vigentes también cuenta (BLANK < 0.4 es verdadero en DAX).
+  medida: Secciones bajo 40%
+  filtros: {"Periodo[periodo]": "2026-2"}
+  por: Sede[sede]
+  sql: |
+    WITH oc AS (
+      SELECT x.id_seccion, x.id_sede, x.vacantes,
+             COUNT(i.id_inscripcion) FILTER (WHERE i.estado = 'Vigente') AS vigentes
+      FROM seccion x JOIN periodo p USING (id_periodo)
+      LEFT JOIN inscripcion i USING (id_seccion)
+      WHERE p.periodo = '2026-2'
+      GROUP BY 1, 2, 3)
+    SELECT s.sede AS clave, COUNT(*) AS valor
+    FROM oc JOIN sede s USING (id_sede)
+    WHERE oc.vigentes / oc.vacantes < 0.4
+    GROUP BY 1
+
+- id: secciones_bajo_40_por_ciclo
+  medida: Secciones bajo 40%
+  filtros: {"Periodo[periodo]": "2026-2", "Sede[sede]": "Lima Norte"}
+  por: Curso[ciclo]
+  sql: |
+    WITH oc AS (
+      SELECT x.id_seccion, cu.ciclo, x.vacantes,
+             COUNT(i.id_inscripcion) FILTER (WHERE i.estado = 'Vigente') AS vigentes
+      FROM seccion x JOIN periodo p USING (id_periodo) JOIN sede s USING (id_sede)
+      JOIN curso cu USING (id_curso)
+      LEFT JOIN inscripcion i USING (id_seccion)
+      WHERE p.periodo = '2026-2' AND s.sede = 'Lima Norte'
+      GROUP BY 1, 2, 3)
+    SELECT ciclo AS clave, COUNT(*) AS valor
+    FROM oc WHERE vigentes / vacantes < 0.4
+    GROUP BY 1
+
+- id: retiro_cursos_por_periodo
+  medida: "% retiro de cursos"
+  por: Periodo[periodo]
+  sql: |
+    SELECT p.periodo AS clave, AVG((i.estado = 'Retirado')::INT) AS valor
+    FROM inscripcion i JOIN seccion x USING (id_seccion) JOIN periodo p USING (id_periodo)
+    GROUP BY 1

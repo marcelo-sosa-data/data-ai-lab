@@ -1,0 +1,9 @@
+table Medidas
+
+	measure 'Total alumnos' = CALCULATE(DISTINCTCOUNT(Matricula[id_alumno]), Matricula[creditos_vigentes] >= 12)
+		formatString: #,0
+
+	measure Ocupación = DIVIDE(CALCULATE(COUNTROWS(Inscripcion), Inscripcion[estado] = "Vigente"), SUM(Seccion[vacantes]))
+		formatString: 0%
+
+	measure 'Secciones a cerrar' = COUNTROWS(FILTER(Seccion, [Ocupación] < 0.3))
