@@ -1,0 +1,29 @@
+# Redpanda (API de Kafka) en un solo nodo para desarrollo, y su consola web.
+#   docker compose up -d
+#   broker: localhost:19092   consola: http://localhost:8080
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v25.1.9
+    command:
+      - redpanda start
+      - --mode dev-container
+      - --smp 1
+      - --memory 1G
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health", "--exit-when-healthy"]
+      interval: 5s
+      retries: 20
+
+  consola:
+    image: docker.redpanda.com/redpandadata/console:v3.1.2
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "8080:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy

@@ -1,0 +1,10 @@
+quixstreams>=3.20
+confluent-kafka>=2.6
+duckdb>=1.1
+pandas>=2.1
+numpy>=1.26
+pyarrow>=17
+rich>=13
+streamlit>=1.40
+altair>=5
+pytest>=8

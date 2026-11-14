@@ -1,0 +1,5 @@
+datos/*.parquet
+datos/*.duckdb
+datos/*.duckdb.wal
+datos/salida/
+datos/estado/
