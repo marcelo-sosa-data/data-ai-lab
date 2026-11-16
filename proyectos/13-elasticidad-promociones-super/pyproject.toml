@@ -1,0 +1,33 @@
+[project]
+name = "elasticidad"
+version = "0.1.0"
+description = "Elasticidad de precios con un modelo bayesiano jerárquico y simulador de margen de promociones para un supermercado"
+requires-python = ">=3.11"
+dependencies = [
+    "pymc>=5.20",
+    "nutpie>=0.13",
+    "arviz>=0.20",
+    "duckdb>=1.1",
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "rich>=13",
+]
+
+[project.optional-dependencies]
+app = ["streamlit>=1.40", "altair>=5.4"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+elasticidad = "elasticidad.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning", "ignore::UserWarning", "ignore::RuntimeWarning"]
