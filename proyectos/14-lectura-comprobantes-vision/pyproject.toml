@@ -1,0 +1,35 @@
+[project]
+name = "comprobantes"
+version = "0.1.0"
+description = "Lectura de facturas y boletas escaneadas con validación tributaria y bandeja de revisión para cuentas por pagar"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.50",
+    "pydantic>=2.7",
+    "pytesseract>=0.3.10",
+    "opencv-python-headless>=4.9",
+    "pillow>=10.1",
+    "duckdb>=1.1",
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "rich>=13",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+app = ["streamlit>=1.40", "altair>=5.4"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+comprobantes = "comprobantes.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
