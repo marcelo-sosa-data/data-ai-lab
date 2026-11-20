@@ -1,0 +1,5 @@
+datos/crudo/
+datos/verdad/
+datos/*.parquet
+datos/*.duckdb
+sitio/
