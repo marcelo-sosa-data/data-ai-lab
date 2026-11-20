@@ -1,0 +1,4 @@
+name: admision
+type: duckdb
+options:
+  filename: admision.duckdb

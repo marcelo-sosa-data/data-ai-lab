@@ -1,0 +1,10 @@
+node_modules/
+build/
+.svelte-kit/
+.evidence/template/
+.evidence/meta/
+static/data/
+sources/**/*.duckdb
+*.options.yaml
+.env
+.evidence/customization/

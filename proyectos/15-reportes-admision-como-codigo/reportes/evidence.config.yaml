@@ -1,0 +1,45 @@
+deployment:
+  # GitHub Pages sirve el repositorio en /data-ai-lab; el sitio vive en una subcarpeta
+  basePath: /data-ai-lab/admision
+
+appearance:
+  default: dark
+  switcher: false
+
+theme:
+  colorPalettes:
+    default:
+      light: ["#0E7490", "#64748B", "#D97706", "#7C3AED", "#059669", "#DB2777"]
+      dark: ["#22D3EE", "#7D8B99", "#F59E0B", "#A78BFA", "#34D399", "#F472B6"]
+  colorScales:
+    default:
+      light: ["#E0F7FA", "#0E7490"]
+      dark: ["#121820", "#22D3EE"]
+  colors:
+    primary:
+      light: "#0E7490"
+      dark: "#22D3EE"
+    accent:
+      light: "#D97706"
+      dark: "#F59E0B"
+    base:
+      light: "#FFFFFF"
+      dark: "#0B0F14"
+    info:
+      light: "#0284C7"
+      dark: "#22D3EE"
+    positive:
+      light: "#059669"
+      dark: "#34D399"
+    warning:
+      light: "#D97706"
+      dark: "#F59E0B"
+    negative:
+      light: "#DC2626"
+      dark: "#F87171"
+
+plugins:
+  components:
+    "@evidence-dev/core-components": {}
+  datasources:
+    "@evidence-dev/duckdb": {}

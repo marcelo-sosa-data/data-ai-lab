@@ -1,0 +1,77 @@
+name: 15 reportes de admisión
+
+on:
+  pull_request:
+    paths:
+      - "proyectos/15-reportes-admision-como-codigo/**"
+      - ".github/workflows/15-reportes-admision.yml"
+  push:
+    branches: [main]
+    paths:
+      - "proyectos/15-reportes-admision-como-codigo/**"
+      - ".github/workflows/15-reportes-admision.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: reportes-admision-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: proyectos/15-reportes-admision-como-codigo
+
+jobs:
+  construir:
+    name: Pruebas de datos y sitio
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: proyectos/15-reportes-admision-como-codigo/reportes/package-lock.json
+      - run: pip install -e ".[dev]"
+      - name: Tests
+        run: pytest -q
+      - name: Generar los exports
+        run: python -m admision generar
+      - name: Incidencias sembradas y comparación con el reporte actual
+        run: |
+          python -m admision incidencias
+          python -m admision comparar
+      - name: Modelar, probar y armar la base del sitio
+        # sale con 1 si alguna prueba de severidad error falla: no se construye ni se publica
+        run: python -m admision procesar
+      - name: Construir el sitio
+        working-directory: proyectos/15-reportes-admision-como-codigo/reportes
+        run: |
+          npm ci
+          npm run sources:strict
+          npm run build:strict
+      - name: Preparar la carpeta para Pages
+        run: |
+          mkdir -p sitio
+          mv reportes/build sitio/admision
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: proyectos/15-reportes-admision-como-codigo/sitio
+
+  # Solo publica si el repositorio tiene Pages activado con GitHub Actions
+  # como origen y la variable PAGES_HABILITADO = true.
+  publicar:
+    needs: construir
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.PAGES_HABILITADO == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.despliegue.outputs.page_url }}admision/
+    steps:
+      - id: despliegue
+        uses: actions/deploy-pages@v4
