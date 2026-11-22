@@ -1,0 +1,5 @@
+datos/exports/
+datos/verdad/
+datos/*.parquet
+datos/*.duckdb
+datos/*.duckdb.wal
